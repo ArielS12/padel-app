@@ -73,13 +73,14 @@ public sealed class MatchesController(
     }
 
     [HttpPost("{matchId:guid}/join")]
-    public async Task<IActionResult> Join(Guid matchId, CancellationToken cancellationToken)
+    public async Task<ActionResult<MatchResponse>> Join(Guid matchId, CancellationToken cancellationToken)
     {
         var user = await GetCurrentUserAsync();
         try
         {
             await matches.JoinAsync(matchId, user, cancellationToken);
-            return NoContent();
+            var loaded = await LoadMatchAsync(matchId, cancellationToken);
+            return Ok(ToResponse(loaded, user));
         }
         catch (InvalidOperationException ex)
         {

@@ -155,7 +155,7 @@ export class ApiService {
   }
 
   joinMatch(matchId: string) {
-    return this.http.post<void>(`${this.baseUrl}/matches/${matchId}/join`, {});
+    return this.http.post<MatchResponse>(`${this.baseUrl}/matches/${matchId}/join`, {});
   }
 
   leaveMatch(matchId: string) {

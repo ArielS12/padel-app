@@ -61,12 +61,26 @@ public sealed class DomainRulesTests
         var service = new MatchService(db, new SkillMatcher(), new AvailabilityService(db), notifications, new FakeMercadoPagoService(db));
         var startsAt = NextWeekdayUtc(DayOfWeek.Monday, 10);
         var match = await service.CreateAsync(user, new CreateMatchRequest(court.Id, startsAt, 90), CancellationToken.None);
+        db.Payments.Add(new Payment
+        {
+            MatchId = match.Id,
+            UserId = user.Id,
+            Amount = 2500m,
+            OwnerAmount = 2325m,
+            AdminFeeAmount = 75m,
+            ProcessingReserveAmount = 100m,
+            Status = PaymentStatus.Authorized,
+            ProviderAuthorizedPaymentId = "authorized-payment"
+        });
+        await db.SaveChangesAsync();
 
         var cancelled = await service.CancelIncompleteAsync(startsAt.AddMinutes(-90), CancellationToken.None);
         var booking = await db.CourtBookings.SingleAsync(x => x.Id == match.CourtBookingId);
+        var payment = await db.Payments.SingleAsync();
 
         Assert.Equal(1, cancelled);
         Assert.Equal(MatchStatus.Cancelled, match.Status);
+        Assert.Equal(PaymentStatus.Cancelled, payment.Status);
         Assert.True(booking.IsCancelled);
         Assert.Contains(match.Id, notifications.CancelledMatches);
     }

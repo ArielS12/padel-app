@@ -711,12 +711,16 @@ public sealed class MatchService(
             return;
         }
 
-        match.Status = MatchStatus.Cancelled;
-        foreach (var payment in match.Payments.Where(payment => payment.Status is PaymentStatus.Pending or PaymentStatus.Authorized))
+        var activePaymentIds = match.Payments
+            .Where(payment => payment.Status is PaymentStatus.Pending or PaymentStatus.Authorized)
+            .Select(payment => payment.Id)
+            .ToList();
+        foreach (var paymentId in activePaymentIds)
         {
-            payment.Status = PaymentStatus.Cancelled;
+            await payments.CancelAuthorizedPaymentAsync(paymentId, cancellationToken);
         }
 
+        match.Status = MatchStatus.Cancelled;
         await db.SaveChangesAsync(cancellationToken);
         await availability.ReleaseSlotAsync(match.CourtBookingId, cancellationToken);
         await notifications.NotifyMatchCancelledAsync(match, cancellationToken);
