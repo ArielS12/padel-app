@@ -135,8 +135,9 @@ static string ConvertPostgresUrl(string databaseUrl)
     var username = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(0) ?? string.Empty);
     var password = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? string.Empty);
     var database = uri.AbsolutePath.TrimStart('/');
+    var port = uri.Port > 0 ? uri.Port : 5432;
 
-    return $"Host={uri.Host};Port={uri.Port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+    return $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
 }
 
 static async Task InitializeDatabaseAsync(WebApplication app, string databaseProvider)
