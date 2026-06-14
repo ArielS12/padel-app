@@ -1,0 +1,44 @@
+databases:
+  - name: padel-db
+    plan: free
+
+services:
+  - type: web
+    name: padel-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./server/src/Padel.Api/Dockerfile
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: Database__Provider
+        value: PostgreSQL
+      - key: DATABASE_URL
+        fromDatabase:
+          name: padel-db
+          property: connectionString
+      - key: Jwt__Issuer
+        value: Padel.Api
+      - key: Jwt__Audience
+        value: Padel.Client
+      - key: Jwt__Key
+        generateValue: true
+      - key: Cors__AllowedOrigins__0
+        value: https://padel-client.onrender.com
+      - key: Seed__AdminEmail
+        sync: false
+      - key: Seed__AdminPassword
+        sync: false
+
+  - type: static
+    name: padel-client
+    rootDir: client
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist/padel-client/browser
+    envVars:
+      - key: API_BASE_URL
+        value: https://padel-api.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

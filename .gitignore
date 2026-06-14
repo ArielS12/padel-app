@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+.vscode/.cache/
+node_modules/
+dist/
+.angular/
+TestResults/
+*.user
+*.suo
+*.log
+appsettings.Local.json

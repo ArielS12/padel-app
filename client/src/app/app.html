@@ -1,0 +1,531 @@
+<main class="shell">
+  <div class="loading-overlay" *ngIf="loading$ | async" aria-live="polite" aria-busy="true">
+    <div class="spinner"></div>
+    <span>Cargando...</span>
+  </div>
+
+  <section class="hero" *ngIf="token">
+    <div>
+      <p class="eyebrow">Padel Match</p>
+      <h1>Tu dashboard de padel</h1>
+      <p>Crea turnos, busca partidos, revisa el estado de tus reservas y personaliza tu perfil.</p>
+    </div>
+
+    <div class="hero-card" *ngIf="profile">
+      <img *ngIf="profile.profilePhotoUrl" [src]="profile.profilePhotoUrl" [alt]="profile.fullName">
+      <strong>{{ profile.fullName }}</strong>
+      <span>{{ profile.category }} {{ profile.level }}</span>
+      <small>{{ profile.followers }} seguidores · {{ profile.following }} seguidos</small>
+      <button type="button" (click)="logout()">Cerrar sesion</button>
+    </div>
+
+    <div class="hero-card" *ngIf="!profile">
+      <strong>{{ isClubOwner ? 'Dueño de cancha' : isAdmin ? 'Administrador' : 'Jugador' }}</strong>
+      <span>{{ isClubOwner ? 'Panel exclusivo para gestionar clubes y canchas.' : isAdmin ? 'Panel exclusivo de administracion.' : 'Panel de jugador.' }}</span>
+      <button type="button" (click)="logout()">Cerrar sesion</button>
+    </div>
+  </section>
+
+  <p class="notice success" *ngIf="message">{{ message }}</p>
+  <p class="notice error" *ngIf="error">{{ error }}</p>
+
+  <section class="auth-layout" *ngIf="!token">
+    <article class="card auth-card" *ngIf="authMode === 'login'">
+      <h2>Iniciar sesion</h2>
+      <form (ngSubmit)="login()">
+        <label>Usuario
+          <input name="loginEmail" type="email" [(ngModel)]="loginForm.email" required>
+        </label>
+        <label>Contrasena
+          <input name="loginPassword" type="password" [(ngModel)]="loginForm.password" required>
+        </label>
+        <button type="submit">Entrar</button>
+      </form>
+
+      <div class="auth-links">
+        <button type="button" class="link-button" (click)="authMode = 'register'">Registrarse</button>
+        <button type="button" class="link-button" (click)="authMode = 'forgot'">Recuperar contraseña</button>
+      </div>
+    </article>
+
+    <article class="card auth-card" *ngIf="authMode === 'register'">
+      <h2>Crear cuenta de usuario</h2>
+      <p class="muted">El registro crea siempre una cuenta de jugador.</p>
+      <form (ngSubmit)="register()">
+        <label>Email <input name="registerEmail" type="email" [(ngModel)]="registerForm.email" required></label>
+        <label>Contrasena <input name="registerPassword" type="password" [(ngModel)]="registerForm.password" required></label>
+        <label>Nombre completo <input name="registerName" [(ngModel)]="registerForm.fullName" required></label>
+        <div class="row">
+          <label>Categoria
+            <select name="registerCategory" [(ngModel)]="registerForm.category">
+              <option *ngFor="let category of categories" [ngValue]="category">{{ category }}</option>
+            </select>
+          </label>
+          <label>Nivel
+            <select name="registerLevel" [(ngModel)]="registerForm.level">
+              <option *ngFor="let level of levels" [ngValue]="level">{{ level }}</option>
+            </select>
+          </label>
+        </div>
+        <label>Ciudad <input name="registerCity" [(ngModel)]="registerForm.city"></label>
+        <label>Telefono <input name="registerPhone" [(ngModel)]="registerForm.phone"></label>
+        <button type="submit">Crear cuenta</button>
+      </form>
+      <button type="button" class="link-button" (click)="authMode = 'login'">Volver al inicio de sesion</button>
+    </article>
+
+    <article class="card auth-card" *ngIf="authMode === 'forgot'">
+      <h2>Recuperar contraseña</h2>
+      <p class="muted">Ingresa tu email y te enviaremos instrucciones para recuperar el acceso.</p>
+      <form (ngSubmit)="requestPasswordReset()">
+        <label>Email
+          <input name="forgotEmail" type="email" [(ngModel)]="forgotPasswordForm.email" required>
+        </label>
+        <button type="submit">Enviar correo</button>
+      </form>
+      <button type="button" class="link-button" (click)="authMode = 'login'">Volver al inicio de sesion</button>
+    </article>
+  </section>
+
+  <ng-container *ngIf="token">
+    <section class="dashboard-summary">
+      <button type="button" *ngIf="isPlayer" [class.active]="activeSection === 'create'" [disabled]="hasActiveMatch" (click)="setSection('create')">
+        Crear turno
+      </button>
+      <button type="button" *ngIf="isPlayer" [class.active]="activeSection === 'available'" (click)="setSection('available')">
+        Turnos disponibles <span>{{ matches.length }}</span>
+      </button>
+      <button type="button" *ngIf="isPlayer" [class.active]="activeSection === 'mine'" (click)="setSection('mine')">
+        Mis turnos <span>{{ myMatches.length }}</span>
+      </button>
+      <button type="button" *ngIf="isPlayer" [class.active]="activeSection === 'profile'" (click)="setSection('profile')">
+        Mi perfil
+      </button>
+      <button type="button" *ngIf="isClubOwner" [class.active]="activeSection === 'club'" (click)="setSection('club')">
+        Panel de cancha
+      </button>
+      <button type="button" *ngIf="isAdmin" [class.active]="activeSection === 'admin'" (click)="setSection('admin')">
+        Administracion
+      </button>
+      <button type="button" *ngIf="isAdmin || isClubOwner || isPlayer" [class.active]="activeSection === 'payments'" (click)="setSection('payments')">
+        Pagos
+      </button>
+    </section>
+
+    <section class="panel" *ngIf="activeSection === 'create' && isPlayer && !hasActiveMatch">
+      <article class="card">
+        <h2>Crear turno</h2>
+        <p class="muted">Selecciona el dia, la cancha y luego elige un horario disponible.</p>
+
+        <form (ngSubmit)="createMatch()">
+          <div class="row">
+            <label>Dia
+              <input name="createDate" type="date" [(ngModel)]="createTurnForm.date" (ngModelChange)="onCreateDateChange($event)">
+            </label>
+            <label>Club
+              <select name="createClub" [(ngModel)]="createTurnForm.clubId" (ngModelChange)="onCreateClubChange($event)">
+                <option value="" disabled>Selecciona un club</option>
+                <option *ngFor="let club of clubs" [ngValue]="club.id">{{ club.name }}</option>
+              </select>
+            </label>
+          </div>
+
+          <label>Cancha
+            <select name="createCourt" [(ngModel)]="createTurnForm.courtId" (ngModelChange)="onCreateCourtChange($event)" [disabled]="!courtsForCreateClub.length">
+              <option value="" disabled>Selecciona una cancha</option>
+              <option *ngFor="let court of courtsForCreateClub" [ngValue]="court.id">
+                {{ court.name }} · {{ court.isCovered ? 'Techada' : 'No techada' }} · {{ court.floorType }} · ${{ court.fullMatchPrice }}
+              </option>
+            </select>
+          </label>
+
+          <button type="button" class="secondary" (click)="loadAvailableForCreate()" [disabled]="!createTurnForm.clubId || !createTurnForm.courtId">
+            Ver horarios disponibles
+          </button>
+
+          <label>Horario disponible
+            <select name="createSlot" [(ngModel)]="createTurnForm.slotStartsAtUtc" (ngModelChange)="chooseCreateSlot($event)" [disabled]="!availableSlotsForSelectedCourt.length">
+              <option value="" disabled>Selecciona un horario</option>
+              <option *ngFor="let slot of availableSlotsForSelectedCourt" [ngValue]="slot.startsAtUtc">
+                {{ slot.startsAtUtc | date:'HH:mm':'UTC' }} - {{ slot.endsAtUtc | date:'HH:mm':'UTC' }} · ${{ slot.price }}
+              </option>
+            </select>
+          </label>
+
+          <div class="empty" *ngIf="createTurnForm.courtId && availability.length && !availableSlotsForSelectedCourt.length">
+            No hay horarios disponibles para esa cancha en el dia seleccionado.
+          </div>
+
+          <button type="submit" [disabled]="!selectedCreateSlot">Crear turno</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="panel" *ngIf="activeSection === 'create' && isPlayer && hasActiveMatch">
+      <article class="card">
+        <h2>Crear turno desactivado</h2>
+        <p class="notice error">Ya estas dentro de un turno activo. No puedes crear otro hasta que ese turno termine o sea cancelado.</p>
+        <button type="button" class="secondary" (click)="setSection('mine')">Ver mis turnos</button>
+      </article>
+    </section>
+
+    <section class="panel" *ngIf="activeSection === 'available' && isPlayer">
+      <article class="card">
+        <h2>Turnos disponibles</h2>
+        <p class="muted">Aqui ves turnos a los que puedes unirte. Si haces busqueda completa, puedes solicitar acceso aunque estes fuera de rango.</p>
+        <div class="actions">
+          <button type="button" (click)="searchMatches(false)">Compatibles conmigo</button>
+          <button type="button" class="secondary" (click)="searchMatches(true)">Busqueda completa</button>
+        </div>
+
+        <label>Mensaje para solicitud fuera de rango
+          <textarea name="requestMessage" [(ngModel)]="requestMessage"></textarea>
+        </label>
+
+        <div class="empty" *ngIf="!matches.length">No hay turnos disponibles en esta busqueda.</div>
+        <div class="match" *ngFor="let match of matches">
+          <div>
+            <strong>{{ match.clubName }} - {{ match.courtName }}</strong>
+            <span>{{ match.startsAtUtc | date:'short' }} · {{ match.requiredCategory }} {{ match.requiredLevel }}</span>
+            <small>{{ match.playerCount }}/4 jugadores · Estado: {{ match.status }}</small>
+          </div>
+          <div class="players" *ngIf="match.players.length">
+            <span *ngFor="let player of match.players">Equipo {{ player.teamNumber }}: {{ player.fullName }}</span>
+          </div>
+          <div class="actions">
+            <button type="button" *ngIf="match.canJoinDirectly" (click)="joinMatch(match)">Unirme</button>
+            <button type="button" *ngIf="!match.canJoinDirectly" (click)="requestJoin(match)">Solicitar acceso</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel" *ngIf="activeSection === 'mine' && isPlayer">
+      <article class="card">
+        <h2>Mis turnos</h2>
+        <p class="muted">Aqui aparecen los turnos que creaste y los turnos a los que te uniste.</p>
+        <button type="button" class="secondary" (click)="loadMyMatches()">Actualizar mis turnos</button>
+
+        <div class="empty" *ngIf="!myMatches.length">Todavia no tienes turnos.</div>
+        <div class="match" *ngFor="let match of myMatches">
+          <div class="match-header">
+            <div>
+              <strong>{{ match.clubName }} - {{ match.courtName }}</strong>
+              <span>{{ match.startsAtUtc | date:'short' }} · {{ match.playerCount }}/4 jugadores</span>
+              <small>Pago: {{ match.currentUserPaymentStatus || 'Pendiente de autorizacion' }}</small>
+            </div>
+            <span class="status">{{ match.isCreator ? 'Creador' : 'Jugador' }} · {{ match.status }}</span>
+          </div>
+          <div class="players" *ngIf="match.players.length">
+            <span *ngFor="let player of match.players">Equipo {{ player.teamNumber }}: {{ player.fullName }}</span>
+          </div>
+          <div class="actions">
+            <button type="button" class="danger" *ngIf="match.isCreator && match.status !== 'Cancelled'" (click)="cancelMatch(match)">Cancelar turno</button>
+            <button type="button" class="danger" *ngIf="!match.isCreator && match.status !== 'Cancelled' && match.status !== 'Completed'" (click)="leaveMatch(match)">Salir del turno</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>Solicitudes para mis turnos</h2>
+        <button type="button" class="secondary" (click)="loadJoinRequests()">Actualizar solicitudes</button>
+        <div class="empty" *ngIf="!joinRequests.length">No tienes solicitudes pendientes.</div>
+        <div class="list-item" *ngFor="let request of joinRequests">
+          <div>
+            <strong>{{ request.fullName }}</strong>
+            <small>{{ request.message || 'Sin mensaje' }}</small>
+          </div>
+          <div class="actions">
+            <button type="button" (click)="acceptRequest(request)">Aceptar</button>
+            <button type="button" class="danger" (click)="rejectRequest(request)">Rechazar</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel grid two" *ngIf="activeSection === 'profile' && isPlayer">
+      <article class="card">
+        <h2>Mi perfil</h2>
+        <form (ngSubmit)="updateProfile()">
+          <label>Nombre <input name="profileName" [(ngModel)]="profileForm.fullName"></label>
+          <label>Foto de perfil URL <input name="profilePhoto" [(ngModel)]="profileForm.profilePhotoUrl"></label>
+          <label>Ciudad <input name="profileCity" [(ngModel)]="profileForm.city"></label>
+          <label>Telefono <input name="profilePhone" [(ngModel)]="profileForm.phone"></label>
+          <label>Bio <textarea name="profileBio" [(ngModel)]="profileForm.bio"></textarea></label>
+          <div class="row">
+            <label>Categoria
+              <select name="profileCategory" [(ngModel)]="profileForm.category">
+                <option *ngFor="let category of categories" [ngValue]="category">{{ category }}</option>
+              </select>
+            </label>
+            <label>Nivel
+              <select name="profileLevel" [(ngModel)]="profileForm.level">
+                <option *ngFor="let level of levels" [ngValue]="level">{{ level }}</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit">Guardar perfil</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Notificaciones</h2>
+        <button type="button" class="secondary" (click)="loadNotifications()">Actualizar</button>
+        <div class="empty" *ngIf="!notifications.length">No tienes notificaciones.</div>
+        <div class="list-item" *ngFor="let notification of notifications" [class.unread]="!notification.isRead">
+          <div>
+            <strong>{{ notification.title }}</strong>
+            <small>{{ notification.message }} · {{ notification.createdAtUtc | date:'short' }}</small>
+          </div>
+          <button type="button" class="secondary" (click)="markNotificationRead(notification)">Leida</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel grid two" *ngIf="activeSection === 'club' && isClubOwner">
+      <article class="card">
+        <h2>Panel de cancha</h2>
+        <p class="muted">Registra tu club y luego carga cada cancha con sus datos, horarios y coste.</p>
+        <form (ngSubmit)="registerClub()">
+          <label>Nombre del club <input name="clubName" [(ngModel)]="clubForm.name" required></label>
+          <button type="submit">Registrar para aprobacion</button>
+        </form>
+
+        <hr>
+        <h3>Completar datos y canchas</h3>
+        <form (ngSubmit)="completeClub()">
+          <label>Club a editar
+            <select name="clubId" [(ngModel)]="clubDetailsForm.clubId" (ngModelChange)="selectClubById($event)" required>
+              <option value="" disabled>Selecciona un club</option>
+              <option *ngFor="let club of ownerClubs" [ngValue]="club.id">{{ club.name }} · {{ club.status }}</option>
+            </select>
+          </label>
+          <p class="notice error" *ngIf="!clubDetailsForm.clubId">Primero registra un club o selecciona uno de "Mis canchas".</p>
+          <label>Direccion <input name="clubAddress" [(ngModel)]="clubDetailsForm.address"></label>
+          <label>Ciudad <input name="clubCity" [(ngModel)]="clubDetailsForm.city"></label>
+
+          <div class="court-editor" *ngFor="let court of clubDetailsForm.courts; let courtIndex = index">
+            <div class="match-header">
+              <h3>{{ court.name || 'Cancha' }}</h3>
+              <button type="button" class="danger" (click)="removeCourt(courtIndex)" [disabled]="clubDetailsForm.courts.length === 1">Quitar</button>
+            </div>
+
+            <label>Nombre de la cancha
+              <input name="courtName{{ courtIndex }}" [(ngModel)]="court.name" required>
+            </label>
+
+            <div class="row">
+              <label>Techada
+                <select name="courtCovered{{ courtIndex }}" [(ngModel)]="court.isCovered">
+                  <option [ngValue]="true">Si</option>
+                  <option [ngValue]="false">No</option>
+                </select>
+              </label>
+              <label>Activa
+                <select name="courtActive{{ courtIndex }}" [(ngModel)]="court.isActive">
+                  <option [ngValue]="true">Si</option>
+                  <option [ngValue]="false">No</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="row">
+              <label>Tipo de piso
+                <select name="courtFloor{{ courtIndex }}" [(ngModel)]="court.floorType">
+                  <option *ngFor="let floor of floorTypes" [ngValue]="floor">{{ floor }}</option>
+                </select>
+              </label>
+              <label>Tipo de pared
+                <select name="courtWall{{ courtIndex }}" [(ngModel)]="court.wallType">
+                  <option *ngFor="let wall of wallTypes" [ngValue]="wall">{{ wall }}</option>
+                </select>
+              </label>
+            </div>
+
+            <label>Coste del turno completo
+              <input name="courtPrice{{ courtIndex }}" type="number" min="0" [(ngModel)]="court.fullMatchPrice">
+            </label>
+
+            <h3>Rangos horarios reservables</h3>
+            <div class="schedule-row" *ngFor="let schedule of court.schedules; let scheduleIndex = index">
+              <label>Dia
+                <select name="scheduleDay{{ courtIndex }}{{ scheduleIndex }}" [(ngModel)]="schedule.dayOfWeek">
+                  <option *ngFor="let day of weekDays" [ngValue]="day.value">{{ day.label }}</option>
+                </select>
+              </label>
+              <label>Desde <input name="scheduleOpen{{ courtIndex }}{{ scheduleIndex }}" type="time" step="60" [(ngModel)]="schedule.opensAt"></label>
+              <label>Hasta <input name="scheduleClose{{ courtIndex }}{{ scheduleIndex }}" type="time" step="60" [(ngModel)]="schedule.closesAt"></label>
+              <label>Minutos <input name="scheduleSlot{{ courtIndex }}{{ scheduleIndex }}" type="number" [(ngModel)]="schedule.slotMinutes"></label>
+              <button type="button" class="danger" (click)="removeCourtSchedule(court, scheduleIndex)" [disabled]="court.schedules.length === 1">Quitar horario</button>
+            </div>
+
+            <button type="button" class="secondary" (click)="addCourtSchedule(court)">Agregar rango horario</button>
+          </div>
+
+          <div class="actions">
+            <button type="button" class="secondary" (click)="addCourt()">Agregar otra cancha</button>
+            <button type="submit" [disabled]="!clubDetailsForm.clubId">Guardar datos de canchas</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Mis canchas</h2>
+        <button type="button" class="secondary" (click)="loadOwnerClubs()">Actualizar</button>
+        <div class="empty" *ngIf="!ownerClubs.length">Todavia no registraste canchas.</div>
+        <button class="list-item" type="button" *ngFor="let club of ownerClubs" (click)="selectClub(club)">
+          <span>{{ club.name }}</span>
+          <small>{{ club.status }} · {{ club.city || 'Sin ciudad' }} · {{ club.courtCount }} canchas · ${{ club.fullMatchPrice }}</small>
+        </button>
+
+        <hr>
+        <h2>Administracion de cuenta</h2>
+        <p class="muted">Cambia los datos de la cuenta de login del dueño.</p>
+        <form (ngSubmit)="updateOwnerAccount()">
+          <label>Email de login <input name="ownerAccountEmail" [value]="ownerAccount?.email || ''" disabled></label>
+          <label>Nombre completo <input name="ownerAccountName" [(ngModel)]="ownerAccountForm.fullName"></label>
+          <label>Telefono <input name="ownerAccountPhone" [(ngModel)]="ownerAccountForm.phone"></label>
+
+          <div class="row">
+            <label>Contraseña actual <input name="ownerCurrentPassword" type="password" [(ngModel)]="ownerAccountForm.currentPassword"></label>
+            <label>Nueva contraseña <input name="ownerNewPassword" type="password" [(ngModel)]="ownerAccountForm.newPassword"></label>
+          </div>
+          <label>Confirmar nueva contraseña <input name="ownerConfirmPassword" type="password" [(ngModel)]="ownerAccountForm.confirmNewPassword"></label>
+          <button type="submit">Guardar cuenta</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="panel grid two" *ngIf="activeSection === 'payments' && isClubOwner">
+      <article class="card">
+        <h2>Pagos</h2>
+        <p class="muted">Vincula tu cuenta de Mercado Pago para recibir automaticamente el 93% de cada pago del turno.</p>
+        <div class="notice" *ngIf="ownerAccount?.hasMercadoPagoAccessToken">
+          Cuenta vinculada{{ ownerAccount?.mercadoPagoUserId ? ' · Usuario MP ' + ownerAccount?.mercadoPagoUserId : '' }}.
+        </div>
+        <button type="button" *ngIf="!ownerAccount?.hasMercadoPagoAccessToken" (click)="connectMercadoPagoAccount()">
+          Vincular Mercado Pago
+        </button>
+        <button type="button" class="danger" *ngIf="ownerAccount?.hasMercadoPagoAccessToken" (click)="disconnectMercadoPagoAccount()">
+          Desvincular Mercado Pago
+        </button>
+        <button type="button" class="secondary" (click)="loadOwnerAccount()">Actualizar estado</button>
+        <p class="muted" *ngIf="!ownerAccount?.hasMercadoPagoAccessToken">Mercado Pago pedira autorizacion en una pestaña nueva. No necesitas copiar access tokens ni public keys.</p>
+        <p class="muted" *ngIf="ownerAccount?.hasMercadoPagoAccessToken">Para cambiar de cuenta, primero desvincula la actual y luego vincula la nueva.</p>
+      </article>
+    </section>
+
+    <section class="panel grid two" *ngIf="activeSection === 'payments' && isPlayer">
+      <article class="card">
+        <h2>Pagos</h2>
+        <p class="muted">Vincula tu cuenta de Mercado Pago para reservar automaticamente tu parte cuando creas o te unes a un turno.</p>
+        <div class="notice" *ngIf="playerPaymentMethod?.hasPaymentMethod">
+          Cuenta de Mercado Pago vinculada.
+        </div>
+        <div class="notice error" *ngIf="!playerPaymentMethod?.canReserveAutomatically">
+          Vincula tu cuenta de Mercado Pago para poder crear o unirte a turnos.
+        </div>
+
+        <div class="actions">
+          <button type="button" *ngIf="!playerPaymentMethod?.hasPaymentMethod" (click)="connectPlayerMercadoPagoAccount()" [disabled]="!playerPaymentConfig?.canConnectMercadoPagoAccount">
+            Vincular cuenta Mercado Pago
+          </button>
+          <button type="button" class="secondary" (click)="loadPlayerPaymentConfig(); loadPlayerPaymentMethod()">Actualizar estado</button>
+        </div>
+        <p class="muted" *ngIf="!playerPaymentConfig?.canConnectMercadoPagoAccount">
+          El administrador debe configurar Mercado Pago OAuth para habilitar la vinculacion de cuenta.
+        </p>
+        <p class="muted">
+          Despues de vincularla, no tendras que cargar datos de tarjeta dentro de la app.
+        </p>
+
+        <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasPaymentMethod" (click)="deletePlayerPaymentMethod()">
+          Desvincular cuenta Mercado Pago
+        </button>
+      </article>
+
+      <article class="card">
+        <h2>Como funciona</h2>
+        <p class="muted">Al crear o unirte a un turno se intenta reservar tu importe automaticamente. Si Mercado Pago rechaza la reserva, no quedas dentro del turno.</p>
+        <p class="muted">Cuando el turno termina, la aplicacion captura automaticamente los pagos reservados. Si sales antes del partido, se cancela tu reserva.</p>
+      </article>
+    </section>
+
+    <section class="panel grid two" *ngIf="activeSection === 'payments' && isAdmin">
+      <article class="card">
+        <h2>Pagos</h2>
+        <p class="muted">Configura la aplicacion marketplace de Mercado Pago. La cuenta dueña de esta aplicacion recibe el fee administrativo, y con OAuth los dueños y jugadores pueden vincular sus cuentas.</p>
+        <form (ngSubmit)="updateMercadoPagoSettings()">
+          <label>Ambiente
+            <select name="mpPaymentsEnvironment" [(ngModel)]="mercadoPagoSettingsForm.environment">
+              <option *ngFor="let environment of mercadoPagoEnvironments" [ngValue]="environment">{{ environment }}</option>
+            </select>
+          </label>
+          <label>Public Key plataforma
+            <input name="mpPaymentsPublicKey" [(ngModel)]="mercadoPagoSettingsForm.publicKey" placeholder="Ej: APP_USR... o TEST...">
+          </label>
+          <label>Application ID / Client ID
+            <input name="mpPaymentsOAuthClientId" [(ngModel)]="mercadoPagoSettingsForm.oauthClientId" placeholder="Ej: 2578244267954252, no APP_USR...">
+          </label>
+          <label>Client secret
+            <input name="mpPaymentsOAuthClientSecret" type="password" [(ngModel)]="mercadoPagoSettingsForm.oauthClientSecret" [placeholder]="mercadoPagoSettings?.hasOAuthClientSecret ? 'Secret configurado. Completa solo si quieres reemplazarlo.' : 'Carga el client secret de la app'">
+          </label>
+          <label>Redirect URL OAuth
+            <input name="mpPaymentsOAuthRedirectUrl" [(ngModel)]="mercadoPagoSettingsForm.oauthRedirectUrl">
+          </label>
+          <label>URL exito
+            <input name="mpPaymentsSuccessUrl" [(ngModel)]="mercadoPagoSettingsForm.successUrl">
+          </label>
+          <label>URL error
+            <input name="mpPaymentsFailureUrl" [(ngModel)]="mercadoPagoSettingsForm.failureUrl">
+          </label>
+          <label>URL pendiente
+            <input name="mpPaymentsPendingUrl" [(ngModel)]="mercadoPagoSettingsForm.pendingUrl">
+          </label>
+          <label>URL webhook
+            <input name="mpPaymentsNotificationUrl" [(ngModel)]="mercadoPagoSettingsForm.notificationUrl">
+          </label>
+          <button type="submit">Guardar configuración de pagos</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="panel grid two" *ngIf="activeSection === 'admin' && isAdmin">
+      <article class="card">
+        <h2>Crear dueño de cancha</h2>
+        <p class="muted">El dueño iniciara sesion con el email y contraseña que indiques aqui.</p>
+        <form (ngSubmit)="registerClubOwner()">
+          <label>Email de login <input name="ownerRegisterEmail" type="email" [(ngModel)]="ownerRegisterForm.email" required></label>
+          <label>Contrasena temporal <input name="ownerRegisterPassword" type="password" [(ngModel)]="ownerRegisterForm.password" required></label>
+          <label>Nombre completo <input name="ownerRegisterName" [(ngModel)]="ownerRegisterForm.fullName" required></label>
+          <label>Telefono <input name="ownerRegisterPhone" [(ngModel)]="ownerRegisterForm.phone"></label>
+          <button type="submit">Crear dueño</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Administracion de canchas</h2>
+        <p class="muted">Aprueba o rechaza las canchas registradas por dueños.</p>
+        <button type="button" class="secondary" (click)="loadPendingClubs()">Actualizar pendientes</button>
+        <div class="empty" *ngIf="!pendingClubs.length">No hay canchas pendientes de aprobacion.</div>
+        <div class="list-item" *ngFor="let club of pendingClubs">
+          <div>
+            <strong>{{ club.name }}</strong>
+            <small>{{ club.city || 'Sin ciudad' }} · {{ club.courtCount }} canchas · ${{ club.fullMatchPrice }}</small>
+          </div>
+          <div class="actions">
+            <button type="button" (click)="approveClub(club)">Aprobar</button>
+            <button type="button" class="danger" (click)="rejectClub(club)">Rechazar</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card" *ngIf="lastPayment">
+      <h2>Mercado Pago</h2>
+      <p>Autorizacion de pago creada.</p>
+      <p class="muted">Completa el proceso en Mercado Pago para reservar tu lugar en el turno.</p>
+      <a [href]="lastPayment.checkoutUrl" target="_blank" rel="noreferrer">Abrir autorizacion</a>
+    </section>
+  </ng-container>
+</main>
