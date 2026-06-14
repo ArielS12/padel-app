@@ -24,6 +24,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        var isPostgreSql = Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
 
         builder.Entity<UserFollow>(entity =>
         {
@@ -63,7 +64,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         {
             entity.HasIndex(x => new { x.CourtId, x.StartsAtUtc, x.EndsAtUtc })
                 .IsUnique()
-                .HasFilter("[IsCancelled] = 0");
+                .HasFilter(isPostgreSql ? "\"IsCancelled\" = false" : "[IsCancelled] = 0");
             entity.HasOne(x => x.Court).WithMany().HasForeignKey(x => x.CourtId).OnDelete(DeleteBehavior.Restrict);
         });
 
