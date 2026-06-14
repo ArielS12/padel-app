@@ -421,30 +421,58 @@
     <section class="panel grid two" *ngIf="activeSection === 'payments' && isPlayer">
       <article class="card">
         <h2>Pagos</h2>
-        <p class="muted">Vincula tu cuenta de Mercado Pago para reservar automaticamente tu parte cuando creas o te unes a un turno.</p>
-        <div class="notice" *ngIf="playerPaymentMethod?.hasPaymentMethod">
-          Cuenta de Mercado Pago vinculada.
+        <p class="muted">Agrega una tarjeta para autorizar tu parte al crear o unirte a un turno. El cobro se captura automaticamente al finalizar si el turno se completa.</p>
+        <div class="notice" *ngIf="playerPaymentMethod?.canReserveAutomatically">
+          Tarjeta configurada{{ playerPaymentMethod?.lastFourDigits ? ' · termina en ' + playerPaymentMethod?.lastFourDigits : '' }}.
         </div>
         <div class="notice error" *ngIf="!playerPaymentMethod?.canReserveAutomatically">
-          Vincula tu cuenta de Mercado Pago para poder crear o unirte a turnos.
+          Agrega una tarjeta para poder crear o unirte a turnos.
         </div>
+
+        <form *ngIf="!playerPaymentMethod?.canReserveAutomatically" (ngSubmit)="savePlayerCardPaymentMethod()">
+          <label>Titular de la tarjeta
+            <input name="playerCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" required>
+          </label>
+          <div class="row">
+            <label>Tipo de documento
+              <select name="playerIdentificationType" [(ngModel)]="playerPaymentMethodForm.identificationType">
+                <option value="DNI">DNI</option>
+                <option value="CUIL">CUIL</option>
+                <option value="CUIT">CUIT</option>
+              </select>
+            </label>
+            <label>Numero de documento
+              <input name="playerIdentificationNumber" [(ngModel)]="playerPaymentMethodForm.identificationNumber" required>
+            </label>
+          </div>
+
+          <label>Numero de tarjeta
+            <div class="mp-secure-field" id="playerCardNumberField"></div>
+          </label>
+          <div class="row">
+            <label>Vencimiento
+              <div class="mp-secure-field" id="playerCardExpirationField"></div>
+            </label>
+            <label>CVV
+              <div class="mp-secure-field" id="playerCardSecurityCodeField"></div>
+            </label>
+          </div>
+
+          <button type="submit" [disabled]="isSavingPlayerCard || !playerPaymentConfig?.canTokenizeCards">
+            {{ isSavingPlayerCard ? 'Guardando...' : 'Agregar tarjeta' }}
+          </button>
+        </form>
+
+        <p class="muted" *ngIf="!playerPaymentConfig?.canTokenizeCards">
+          El administrador debe configurar la Public Key de Mercado Pago para habilitar tarjetas.
+        </p>
 
         <div class="actions">
-          <button type="button" *ngIf="!playerPaymentMethod?.hasPaymentMethod" (click)="connectPlayerMercadoPagoAccount()" [disabled]="!playerPaymentConfig?.canConnectMercadoPagoAccount">
-            Vincular cuenta Mercado Pago
-          </button>
           <button type="button" class="secondary" (click)="loadPlayerPaymentConfig(); loadPlayerPaymentMethod()">Actualizar estado</button>
+          <button type="button" class="danger" *ngIf="playerPaymentMethod?.canReserveAutomatically" (click)="deletePlayerPaymentMethod()">
+            Eliminar tarjeta
+          </button>
         </div>
-        <p class="muted" *ngIf="!playerPaymentConfig?.canConnectMercadoPagoAccount">
-          El administrador debe configurar Mercado Pago OAuth para habilitar la vinculacion de cuenta.
-        </p>
-        <p class="muted">
-          Despues de vincularla, no tendras que cargar datos de tarjeta dentro de la app.
-        </p>
-
-        <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasPaymentMethod" (click)="deletePlayerPaymentMethod()">
-          Desvincular cuenta Mercado Pago
-        </button>
       </article>
 
       <article class="card">

@@ -320,11 +320,12 @@ public sealed class DomainRulesTests
         Assert.Contains("\"token\":\"card-token\"", httpHandler.LastRequestBody);
         Assert.Contains("\"application_fee\":75", httpHandler.LastRequestBody);
         Assert.Contains("\"email\":\"buyer@testuser.com\"", httpHandler.LastRequestBody);
+        Assert.DoesNotContain("\"id\":\"customer-", httpHandler.LastRequestBody);
         Assert.Equal(payment.Id.ToString(), httpHandler.LastIdempotencyKey);
     }
 
     [Fact]
-    public async Task MercadoPagoService_ReservesPlayerPaymentWithLinkedAccount()
+    public async Task MercadoPagoService_RejectsLinkedAccountForAutomaticReservation()
     {
         await using var db = CreateDbContext();
         var court = await SeedApprovedClubAsync(db);
@@ -367,16 +368,12 @@ public sealed class DomainRulesTests
             Options.Create(new MercadoPagoOptions()),
             new FakeNotifications());
 
-        var reservation = await service.ReservePlayerPaymentAsync(player, match.Id, CancellationToken.None);
-        var payment = await db.Payments.SingleAsync();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ReservePlayerPaymentAsync(player, match.Id, CancellationToken.None));
 
-        Assert.Equal(PaymentStatus.Pending, reservation.Status);
-        Assert.Equal(PaymentStatus.Pending, payment.Status);
-        Assert.Equal("https://checkout.sandbox", reservation.CheckoutUrl);
-        Assert.Contains("\"marketplace_fee\":75", httpHandler.LastRequestBody);
-        Assert.DoesNotContain("\"token\":", httpHandler.LastRequestBody);
-        Assert.DoesNotContain("\"card_id\":", httpHandler.LastRequestBody);
-        Assert.DoesNotContain("\"email\":", httpHandler.LastRequestBody);
+        Assert.Contains("Agrega una tarjeta", ex.Message);
+        Assert.Empty(db.Payments);
+        Assert.Empty(httpHandler.LastRequestBody);
     }
 
     [Fact]
@@ -616,7 +613,6 @@ public sealed class DomainRulesTests
         db.PlayerPaymentMethods.Add(new PlayerPaymentMethod
         {
             UserId = user.Id,
-            MercadoPagoCustomerId = $"customer-{user.Id}",
             CardToken = "card-token",
             PaymentMethodId = "visa",
             CardBrand = "Visa",

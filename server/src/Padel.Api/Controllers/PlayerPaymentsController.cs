@@ -130,9 +130,10 @@ public sealed class PlayerPaymentsController(AppDbContext db) : ApiControllerBas
 
     private static PlayerPaymentMethodResponse ToResponse(PlayerPaymentMethod? method)
     {
+        var isCardMethod = method?.PaymentMethodId != MercadoPagoAccountMethod;
         var canReserveAutomatically = method?.IsActive == true &&
-            (method.PaymentMethodId == MercadoPagoAccountMethod ||
-                !string.IsNullOrWhiteSpace(method.MercadoPagoCardId) ||
+            isCardMethod &&
+            (!string.IsNullOrWhiteSpace(method.MercadoPagoCardId) ||
                 !string.IsNullOrWhiteSpace(method.CardToken));
 
         return new PlayerPaymentMethodResponse(

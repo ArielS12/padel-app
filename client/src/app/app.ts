@@ -737,7 +737,7 @@ export class App implements OnInit, AfterViewInit {
   }
 
   deletePlayerPaymentMethod() {
-    if (!confirm('Vas a desvincular tu cuenta de Mercado Pago. No podras crear ni unirte a turnos hasta vincularla nuevamente.')) {
+    if (!confirm('Vas a eliminar tu tarjeta. No podras crear ni unirte a turnos hasta agregar una nueva.')) {
       return;
     }
 
@@ -756,7 +756,9 @@ export class App implements OnInit, AfterViewInit {
           cardBrand: '',
           lastFourDigits: ''
         };
-        this.setMessage('Cuenta de Mercado Pago desvinculada.');
+        this.resetMercadoPagoCardFields();
+        window.setTimeout(() => this.initializeMercadoPagoCardFields());
+        this.setMessage('Tarjeta eliminada.');
       },
       error: error => this.showError(error)
     });
@@ -1307,7 +1309,7 @@ export class App implements OnInit, AfterViewInit {
     this.activeSection = 'payments';
     this.loadPlayerPaymentConfig();
     this.loadPlayerPaymentMethod();
-    this.showError({ message: 'Vincula tu cuenta de Mercado Pago en la seccion Pagos para poder reservar automaticamente tu lugar.' });
+    this.showError({ message: 'Agrega una tarjeta en la seccion Pagos para poder autorizar tu lugar.' });
     return false;
   }
 

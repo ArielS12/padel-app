@@ -772,7 +772,6 @@ public sealed class MercadoPagoService(
     INotificationService notifications) : IMercadoPagoService
 {
     private const string MercadoPagoAccountMethod = "mercadopago_account";
-    private const string MercadoPagoAccountMoneyPaymentMethod = "account_money";
     private const decimal OwnerSharePercent = 0.93m;
     private const decimal AdminFeePercent = 0.03m;
     private const decimal ProcessingReservePercent = 0.04m;
@@ -919,17 +918,15 @@ public sealed class MercadoPagoService(
             throw new InvalidOperationException("Configura un medio de pago en la seccion Pagos antes de crear o unirte a un turno.");
         }
 
-        var usesLinkedMercadoPagoAccount = method.PaymentMethodId == MercadoPagoAccountMethod;
-        if (usesLinkedMercadoPagoAccount)
+        if (method.PaymentMethodId == MercadoPagoAccountMethod)
         {
-            return await CreatePreferenceAsync(user, matchId, cancellationToken);
+            throw new InvalidOperationException("Agrega una tarjeta en la seccion Pagos antes de crear o unirte a un turno.");
         }
 
-        if (!usesLinkedMercadoPagoAccount &&
-            string.IsNullOrWhiteSpace(method.CardToken) &&
+        if (string.IsNullOrWhiteSpace(method.CardToken) &&
             string.IsNullOrWhiteSpace(method.MercadoPagoCardId))
         {
-            throw new InvalidOperationException("Vincula tu cuenta de Mercado Pago en la seccion Pagos antes de crear o unirte a un turno.");
+            throw new InvalidOperationException("Agrega una tarjeta en la seccion Pagos antes de crear o unirte a un turno.");
         }
 
         var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
@@ -954,25 +951,32 @@ public sealed class MercadoPagoService(
             AuthorizationExpiresAtUtc = DateTime.UtcNow.Add(AuthorizationWindow)
         };
 
+        var payer = new Dictionary<string, object?>
+        {
+            ["email"] = GetPaymentPayerEmail(user, environment)
+        };
+        if (!string.IsNullOrWhiteSpace(method.MercadoPagoCustomerId))
+        {
+            payer["id"] = method.MercadoPagoCustomerId;
+        }
+
         var payload = new Dictionary<string, object?>
         {
             ["transaction_amount"] = payment.Amount,
             ["description"] = $"Turno de padel {match.StartsAtUtc:g}",
             ["installments"] = 1,
-            ["payment_method_id"] = usesLinkedMercadoPagoAccount ? MercadoPagoAccountMoneyPaymentMethod : method.PaymentMethodId,
+            ["payment_method_id"] = method.PaymentMethodId,
             ["capture"] = false,
             ["application_fee"] = payment.AdminFeeAmount,
             ["external_reference"] = payment.Id.ToString(),
-            ["payer"] = usesLinkedMercadoPagoAccount
-                ? new Dictionary<string, object?> { ["id"] = method.MercadoPagoCustomerId }
-                : new Dictionary<string, object?> { ["id"] = method.MercadoPagoCustomerId, ["email"] = GetPaymentPayerEmail(user, environment) }
+            ["payer"] = payer
         };
 
         if (!string.IsNullOrWhiteSpace(method.CardToken))
         {
             payload["token"] = method.CardToken;
         }
-        else if (!usesLinkedMercadoPagoAccount)
+        else
         {
             payload["card_id"] = method.MercadoPagoCardId;
         }
