@@ -916,6 +916,11 @@ public sealed class MercadoPagoService(
         }
 
         var usesLinkedMercadoPagoAccount = method.PaymentMethodId == MercadoPagoAccountMethod;
+        if (usesLinkedMercadoPagoAccount)
+        {
+            return await CreatePreferenceAsync(user, matchId, cancellationToken);
+        }
+
         if (!usesLinkedMercadoPagoAccount &&
             string.IsNullOrWhiteSpace(method.CardToken) &&
             string.IsNullOrWhiteSpace(method.MercadoPagoCardId))

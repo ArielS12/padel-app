@@ -220,6 +220,9 @@
             <span *ngFor="let player of match.players">Equipo {{ player.teamNumber }}: {{ player.fullName }}</span>
           </div>
           <div class="actions">
+            <a *ngIf="match.currentUserPaymentCheckoutUrl && match.currentUserPaymentStatus === 'Pending'" [href]="match.currentUserPaymentCheckoutUrl" target="_blank" rel="noreferrer">
+              Completar pago
+            </a>
             <button type="button" class="danger" *ngIf="match.isCreator && match.status !== 'Cancelled'" (click)="cancelMatch(match)">Cancelar turno</button>
             <button type="button" class="danger" *ngIf="!match.isCreator && match.status !== 'Cancelled' && match.status !== 'Completed'" (click)="leaveMatch(match)">Salir del turno</button>
           </div>

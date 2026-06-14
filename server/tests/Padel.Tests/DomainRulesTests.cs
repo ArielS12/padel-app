@@ -356,14 +356,13 @@ public sealed class DomainRulesTests
         var reservation = await service.ReservePlayerPaymentAsync(player, match.Id, CancellationToken.None);
         var payment = await db.Payments.SingleAsync();
 
-        Assert.Equal(PaymentStatus.Authorized, reservation.Status);
-        Assert.Equal(PaymentStatus.Authorized, payment.Status);
-        Assert.Contains("\"payment_method_id\":\"account_money\"", httpHandler.LastRequestBody);
-        Assert.Contains($"\"id\":\"customer-{player.Id}\"", httpHandler.LastRequestBody);
+        Assert.Equal(PaymentStatus.Pending, reservation.Status);
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal("https://checkout.sandbox", reservation.CheckoutUrl);
+        Assert.Contains("\"marketplace_fee\":75", httpHandler.LastRequestBody);
         Assert.DoesNotContain("\"token\":", httpHandler.LastRequestBody);
         Assert.DoesNotContain("\"card_id\":", httpHandler.LastRequestBody);
         Assert.DoesNotContain("\"email\":", httpHandler.LastRequestBody);
-        Assert.Equal(payment.Id.ToString(), httpHandler.LastIdempotencyKey);
     }
 
     [Fact]

@@ -869,8 +869,14 @@ export class App implements OnInit, AfterViewInit {
 
     const durationMinutes = Math.round((new Date(selectedSlot.endsAtUtc).getTime() - new Date(selectedSlot.startsAtUtc).getTime()) / 60000);
     this.api.createMatch(selectedSlot.courtId, selectedSlot.startsAtUtc, durationMinutes).subscribe({
-      next: () => {
-        this.setMessage('Turno creado y pago reservado correctamente.');
+      next: match => {
+        if (match.currentUserPaymentCheckoutUrl) {
+          window.open(match.currentUserPaymentCheckoutUrl, '_blank', 'noopener,noreferrer');
+          this.setMessage('Turno creado. Completa el checkout de Mercado Pago para autorizar tu pago.');
+        } else {
+          this.setMessage('Turno creado y pago reservado correctamente.');
+        }
+
         this.activeSection = 'mine';
         this.refreshPrivateData();
       },
@@ -907,7 +913,7 @@ export class App implements OnInit, AfterViewInit {
 
     this.api.joinMatch(match.id).subscribe({
       next: () => {
-        this.setMessage('Te uniste al turno y tu pago quedo reservado.');
+        this.setMessage('Te uniste al turno. Revisa Mis turnos para completar el checkout de Mercado Pago si queda pendiente.');
         this.searchMatches(this.showAllMatches);
         this.loadMyMatches();
         this.loadNotifications();
