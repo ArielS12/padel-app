@@ -30,8 +30,9 @@ services:
       - key: Seed__AdminPassword
         sync: false
 
-  - type: static
+  - type: web
     name: padel-client
+    runtime: static
     rootDir: client
     buildCommand: npm ci && npm run build
     staticPublishPath: dist/padel-client/browser
