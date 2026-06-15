@@ -69,6 +69,7 @@ export interface ClubResponse {
   city?: string;
   courtCount: number;
   fullMatchPrice: number;
+  mercadoPagoPublicKey?: string;
   courts: CourtResponse[];
 }
 

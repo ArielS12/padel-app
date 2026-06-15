@@ -138,6 +138,7 @@ public sealed class AdminController(AppDbContext db) : ApiControllerBase
             club.City,
             club.CourtCount,
             club.FullMatchPrice,
+            club.Owner?.MercadoPagoPublicKey,
             club.Courts
                 .OrderBy(court => court.Name)
                 .Select(court => new CourtResponse(

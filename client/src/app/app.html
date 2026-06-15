@@ -159,6 +159,9 @@
           <hr>
           <h3>Autorizar pago</h3>
           <p class="muted">La tarjeta se tokeniza al crear el turno y se usa una sola vez para autorizar la reserva. El cobro se captura automaticamente al finalizar si el turno se completa.</p>
+          <p class="notice error" *ngIf="!createPaymentPublicKey">
+            El dueño del club debe vincular Mercado Pago nuevamente para habilitar pagos con tarjeta.
+          </p>
           <label>Titular de la tarjeta
             <input name="createCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" required>
           </label>
@@ -186,7 +189,7 @@
             </label>
           </div>
 
-          <button type="submit" [disabled]="!selectedCreateSlot || isSavingPlayerCard">
+          <button type="submit" [disabled]="!selectedCreateSlot || isSavingPlayerCard || !createPaymentPublicKey">
             {{ isSavingPlayerCard ? 'Autorizando...' : 'Crear turno y autorizar pago' }}
           </button>
         </form>

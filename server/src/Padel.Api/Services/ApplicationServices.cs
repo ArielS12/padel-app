@@ -963,6 +963,11 @@ public sealed class MercadoPagoService(
             throw new InvalidOperationException("El dueño del club debe vincular Mercado Pago para poder cobrar turnos.");
         }
 
+        if (authorization is not null && string.IsNullOrWhiteSpace(match.Court.Club.Owner.MercadoPagoPublicKey))
+        {
+            throw new InvalidOperationException("El dueño del club debe volver a vincular Mercado Pago para habilitar pagos con tarjeta.");
+        }
+
         var fullMatchPrice = match.Court.FullMatchPrice > 0 ? match.Court.FullMatchPrice : match.Court.Club.FullMatchPrice;
         var playerAmount = RoundMoney(fullMatchPrice / 4m);
         var payment = new Payment

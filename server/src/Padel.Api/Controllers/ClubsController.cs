@@ -17,6 +17,7 @@ public sealed class ClubsController(AppDbContext db, IAvailabilityService availa
     public async Task<ActionResult<IReadOnlyCollection<ClubResponse>>> GetApproved(CancellationToken cancellationToken)
     {
         var clubs = await db.Clubs
+            .Include(club => club.Owner)
             .Include(club => club.Courts)
             .ThenInclude(court => court.Schedules)
             .Where(club => club.Status == ClubStatus.Approved)
@@ -31,6 +32,7 @@ public sealed class ClubsController(AppDbContext db, IAvailabilityService availa
     public async Task<ActionResult<IReadOnlyCollection<ClubResponse>>> Mine(CancellationToken cancellationToken)
     {
         var clubs = await db.Clubs
+            .Include(club => club.Owner)
             .Include(club => club.Courts)
             .ThenInclude(court => court.Schedules)
             .Where(club => club.OwnerId == CurrentUserId)
@@ -169,6 +171,6 @@ public sealed class ClubsController(AppDbContext db, IAvailabilityService availa
                     .ToList()))
             .ToList();
 
-        return new ClubResponse(club.Id, club.Name, club.Status, club.Address, club.City, club.CourtCount, club.FullMatchPrice, courts);
+        return new ClubResponse(club.Id, club.Name, club.Status, club.Address, club.City, club.CourtCount, club.FullMatchPrice, club.Owner?.MercadoPagoPublicKey, courts);
     }
 }

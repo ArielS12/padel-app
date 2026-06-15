@@ -234,6 +234,10 @@ export class App implements OnInit, AfterViewInit {
       .filter(court => court.isActive) ?? [];
   }
 
+  get createPaymentPublicKey() {
+    return this.clubs.find(club => club.id === this.createTurnForm.clubId)?.mercadoPagoPublicKey;
+  }
+
   get availableSlotsForSelectedCourt() {
     return this.availability.filter(slot =>
       slot.courtId === this.createTurnForm.courtId &&
@@ -694,8 +698,8 @@ export class App implements OnInit, AfterViewInit {
   }
 
   private async createSingleUseCardToken() {
-    if (!this.playerPaymentConfig?.canTokenizeCards || !this.playerPaymentConfig.publicKey) {
-      throw new Error('El administrador debe configurar la Public Key de Mercado Pago para cargar tarjetas.');
+    if (!this.createPaymentPublicKey) {
+      throw new Error('El dueño del club debe vincular Mercado Pago antes de recibir reservas con tarjeta.');
     }
 
     await this.initializeMercadoPagoCardFields();
@@ -817,6 +821,8 @@ export class App implements OnInit, AfterViewInit {
     this.createTurnForm.clubId = clubId;
     this.createTurnForm.slotStartsAtUtc = '';
     this.availability = [];
+    this.resetMercadoPagoCardFields();
+    window.setTimeout(() => this.initializeMercadoPagoCardFields());
 
     const firstCourt = this.courtsForCreateClub[0];
     this.createTurnForm.courtId = firstCourt?.id ?? '';
@@ -1218,6 +1224,8 @@ export class App implements OnInit, AfterViewInit {
         if (!this.createTurnForm.clubId && clubs.length > 0) {
           this.createTurnForm.clubId = clubs[0].id;
           this.createTurnForm.courtId = clubs[0].courts.find(court => court.isActive)?.id ?? '';
+          this.resetMercadoPagoCardFields();
+          window.setTimeout(() => this.initializeMercadoPagoCardFields());
         }
       },
       error: error => this.showError(error)
@@ -1265,7 +1273,8 @@ export class App implements OnInit, AfterViewInit {
   }
 
   private async initializeMercadoPagoCardFields() {
-    if (!this.playerPaymentConfig?.publicKey) {
+    const publicKey = this.createPaymentPublicKey;
+    if (!publicKey) {
       return;
     }
 
@@ -1281,7 +1290,7 @@ export class App implements OnInit, AfterViewInit {
       expirationContainer.childElementCount > 0 &&
       securityCodeContainer.childElementCount > 0;
 
-    if (this.mercadoPagoFields && this.mercadoPagoFieldsPublicKey === this.playerPaymentConfig.publicKey && hasMountedFields) {
+    if (this.mercadoPagoFields && this.mercadoPagoFieldsPublicKey === publicKey && hasMountedFields) {
       return;
     }
 
@@ -1294,9 +1303,9 @@ export class App implements OnInit, AfterViewInit {
     expirationContainer.innerHTML = '';
     securityCodeContainer.innerHTML = '';
 
-    const mp = new window.MercadoPago(this.playerPaymentConfig.publicKey);
+    const mp = new window.MercadoPago(publicKey);
     this.mercadoPagoFields = mp.fields;
-    this.mercadoPagoFieldsPublicKey = this.playerPaymentConfig.publicKey;
+    this.mercadoPagoFieldsPublicKey = publicKey;
     const style = {
       fontSize: '16px',
       color: '#111827',

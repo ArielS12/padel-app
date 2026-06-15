@@ -117,6 +117,7 @@ public sealed record ClubResponse(
     string? City,
     int CourtCount,
     decimal FullMatchPrice,
+    string? MercadoPagoPublicKey,
     IReadOnlyCollection<CourtResponse> Courts);
 
 public sealed record AvailabilityResponse(Guid CourtId, string CourtName, Guid ClubId, string ClubName, DateTime StartsAtUtc, DateTime EndsAtUtc, decimal Price);

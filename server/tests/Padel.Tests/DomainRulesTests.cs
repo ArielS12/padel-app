@@ -535,7 +535,8 @@ public sealed class DomainRulesTests
             UserName = "owner@test.local",
             Email = "owner@test.local",
             EmailConfirmed = true,
-            FullName = "Owner Test"
+            FullName = "Owner Test",
+            MercadoPagoPublicKey = "owner-public-key"
         };
 
         var club = new Club
