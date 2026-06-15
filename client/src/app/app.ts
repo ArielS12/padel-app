@@ -369,6 +369,7 @@ export class App implements OnInit, AfterViewInit {
     this.activeSection = section;
     if (section === 'create') {
       this.loadPublicData();
+      window.setTimeout(() => this.initializeMercadoPagoCardFields());
     }
 
     if (section === 'available') {
@@ -692,6 +693,34 @@ export class App implements OnInit, AfterViewInit {
     });
   }
 
+  private async createSingleUseCardToken() {
+    if (!this.playerPaymentConfig?.canTokenizeCards || !this.playerPaymentConfig.publicKey) {
+      throw new Error('El administrador debe configurar la Public Key de Mercado Pago para cargar tarjetas.');
+    }
+
+    await this.initializeMercadoPagoCardFields();
+    if (!this.mercadoPagoFields) {
+      throw new Error('No se pudieron inicializar los campos seguros de Mercado Pago.');
+    }
+
+    if (!this.playerPaymentMethodForm.cardholderName || !this.playerPaymentMethodForm.identificationNumber) {
+      throw new Error('Completa titular y documento de la tarjeta.');
+    }
+
+    const token = await this.mercadoPagoFields.createCardToken({
+      cardholderName: this.playerPaymentMethodForm.cardholderName,
+      identificationType: this.playerPaymentMethodForm.identificationType,
+      identificationNumber: this.playerPaymentMethodForm.identificationNumber
+    });
+
+    return {
+      cardToken: token.id,
+      paymentMethodId: token.payment_method_id ?? this.playerPaymentMethodForm.paymentMethodId,
+      cardBrand: this.playerPaymentMethodForm.cardBrand || token.payment_method_id || 'Tarjeta',
+      lastFourDigits: token.last_four_digits ?? ''
+    };
+  }
+
   async savePlayerCardPaymentMethod() {
     if (!this.playerPaymentConfig?.canTokenizeCards || !this.playerPaymentConfig.publicKey) {
       this.showError({ message: 'El administrador debe configurar la Public Key de Mercado Pago para cargar tarjetas.' });
@@ -846,11 +875,7 @@ export class App implements OnInit, AfterViewInit {
     this.setMessage(`Seleccionaste ${slot.clubName} - ${slot.courtName}.`);
   }
 
-  createMatch() {
-    if (!this.ensurePlayerPaymentMethodConfigured()) {
-      return;
-    }
-
+  async createMatch() {
     if (this.hasActiveMatch) {
       this.activeSection = 'mine';
       this.setMessage('Ya tienes un turno activo. No puedes crear otro hasta que termine o se cancele.');
@@ -870,20 +895,26 @@ export class App implements OnInit, AfterViewInit {
     }
 
     const durationMinutes = Math.round((new Date(selectedSlot.endsAtUtc).getTime() - new Date(selectedSlot.startsAtUtc).getTime()) / 60000);
-    this.api.createMatch(selectedSlot.courtId, selectedSlot.startsAtUtc, durationMinutes).subscribe({
-      next: match => {
-        if (match.currentUserPaymentCheckoutUrl) {
-          this.setMessage('Turno creado. Redirigiendo a Mercado Pago para autorizar la reserva.');
-          window.location.assign(match.currentUserPaymentCheckoutUrl);
-          return;
+    this.isSavingPlayerCard = true;
+    this.setMessage('Tokenizando tarjeta para autorizar la reserva...');
+    try {
+      const payment = await this.createSingleUseCardToken();
+      this.api.createMatch(selectedSlot.courtId, selectedSlot.startsAtUtc, durationMinutes, payment).subscribe({
+        next: () => {
+          this.isSavingPlayerCard = false;
+          this.setMessage('Turno creado y pago autorizado correctamente.');
+          this.activeSection = 'mine';
+          this.refreshPrivateData();
+        },
+        error: error => {
+          this.isSavingPlayerCard = false;
+          this.showError(error);
         }
-
-        this.setMessage('Turno creado y pago reservado correctamente.');
-        this.activeSection = 'mine';
-        this.refreshPrivateData();
-      },
-      error: error => this.showError(error)
-    });
+      });
+    } catch (error) {
+      this.isSavingPlayerCard = false;
+      this.showError(error);
+    }
   }
 
   searchMatches(all = this.showAllMatches) {

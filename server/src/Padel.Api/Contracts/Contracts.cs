@@ -121,7 +121,14 @@ public sealed record ClubResponse(
 
 public sealed record AvailabilityResponse(Guid CourtId, string CourtName, Guid ClubId, string ClubName, DateTime StartsAtUtc, DateTime EndsAtUtc, decimal Price);
 
-public sealed record CreateMatchRequest(Guid CourtId, DateTime StartsAtUtc, int DurationMinutes);
+public sealed record CreateMatchRequest(
+    Guid CourtId,
+    DateTime StartsAtUtc,
+    int DurationMinutes,
+    string? CardToken = null,
+    string? PaymentMethodId = null,
+    string? CardBrand = null,
+    string? LastFourDigits = null);
 
 public sealed record MatchResponse(
     Guid Id,

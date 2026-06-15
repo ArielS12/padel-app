@@ -466,7 +466,7 @@ public sealed class MatchService(
         await db.SaveChangesAsync(cancellationToken);
         try
         {
-            await payments.ReservePlayerPaymentAsync(creator, match.Id, cancellationToken);
+            await payments.ReservePlayerPaymentAsync(creator, match.Id, ToPaymentAuthorization(request), cancellationToken);
         }
         catch
         {
@@ -679,7 +679,7 @@ public sealed class MatchService(
         try
         {
             var user = await db.Users.SingleAsync(x => x.Id == userId, cancellationToken);
-            await payments.ReservePlayerPaymentAsync(user, match.Id, cancellationToken);
+            await payments.ReservePlayerPaymentAsync(user, match.Id, null, cancellationToken);
         }
         catch
         {
@@ -734,6 +734,17 @@ public sealed class MatchService(
         }
     }
 
+    private static PaymentAuthorizationRequest? ToPaymentAuthorization(CreateMatchRequest request)
+    {
+        return string.IsNullOrWhiteSpace(request.CardToken) || string.IsNullOrWhiteSpace(request.PaymentMethodId)
+            ? null
+            : new PaymentAuthorizationRequest(
+                request.CardToken,
+                request.PaymentMethodId,
+                request.CardBrand,
+                request.LastFourDigits);
+    }
+
     private async Task EnsureUserHasNoActiveMatchAsync(
         string userId,
         CancellationToken cancellationToken,
@@ -758,12 +769,18 @@ public sealed class MatchService(
 public interface IMercadoPagoService
 {
     Task<PaymentPreferenceResponse> CreatePreferenceAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken);
-    Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken);
+    Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, PaymentAuthorizationRequest? authorization, CancellationToken cancellationToken);
     Task UpdatePaymentAsync(string providerPaymentId, PaymentStatus status, CancellationToken cancellationToken);
     Task SyncPaymentFromProviderAsync(Guid paymentId, string providerPaymentId, CancellationToken cancellationToken);
     Task CancelAuthorizedPaymentAsync(Guid paymentId, CancellationToken cancellationToken);
     Task<int> CaptureFinishedMatchPaymentsAsync(DateTime nowUtc, CancellationToken cancellationToken);
 }
+
+public sealed record PaymentAuthorizationRequest(
+    string CardToken,
+    string PaymentMethodId,
+    string? CardBrand,
+    string? LastFourDigits);
 
 public sealed class MercadoPagoService(
     AppDbContext db,
@@ -881,7 +898,7 @@ public sealed class MercadoPagoService(
         return ToPreferenceResponse(payment);
     }
 
-    public async Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken)
+    public async Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, PaymentAuthorizationRequest? authorization, CancellationToken cancellationToken)
     {
         var match = await db.Matches
             .Include(x => x.Court)
@@ -911,8 +928,17 @@ public sealed class MercadoPagoService(
             return ToPreferenceResponse(existingPayment);
         }
 
-        var method = await db.PlayerPaymentMethods
-            .SingleOrDefaultAsync(x => x.UserId == user.Id && x.IsActive, cancellationToken);
+        var method = authorization is null
+            ? await db.PlayerPaymentMethods.SingleOrDefaultAsync(x => x.UserId == user.Id && x.IsActive, cancellationToken)
+            : new PlayerPaymentMethod
+            {
+                UserId = user.Id,
+                CardToken = authorization.CardToken,
+                PaymentMethodId = authorization.PaymentMethodId,
+                CardBrand = authorization.CardBrand,
+                LastFourDigits = authorization.LastFourDigits,
+                IsActive = true
+            };
         if (method is null)
         {
             throw new InvalidOperationException("Configura un medio de pago en la seccion Pagos antes de crear o unirte a un turno.");

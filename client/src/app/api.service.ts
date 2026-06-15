@@ -142,8 +142,13 @@ export class ApiService {
     return this.http.get<AvailabilityResponse[]>(`${this.baseUrl}/clubs/${clubId}/availability`, { params });
   }
 
-  createMatch(courtId: string, startsAtUtc: string, durationMinutes: number) {
-    return this.http.post<MatchResponse>(`${this.baseUrl}/matches`, { courtId, startsAtUtc, durationMinutes });
+  createMatch(courtId: string, startsAtUtc: string, durationMinutes: number, payment?: {
+    cardToken: string;
+    paymentMethodId: string;
+    cardBrand?: string;
+    lastFourDigits?: string;
+  }) {
+    return this.http.post<MatchResponse>(`${this.baseUrl}/matches`, { courtId, startsAtUtc, durationMinutes, ...payment });
   }
 
   searchMatches(all = false) {

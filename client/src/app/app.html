@@ -156,7 +156,39 @@
             No hay horarios disponibles para esa cancha en el dia seleccionado.
           </div>
 
-          <button type="submit" [disabled]="!selectedCreateSlot">Crear turno</button>
+          <hr>
+          <h3>Autorizar pago</h3>
+          <p class="muted">La tarjeta se tokeniza al crear el turno y se usa una sola vez para autorizar la reserva. El cobro se captura automaticamente al finalizar si el turno se completa.</p>
+          <label>Titular de la tarjeta
+            <input name="createCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" required>
+          </label>
+          <div class="row">
+            <label>Tipo de documento
+              <select name="createIdentificationType" [(ngModel)]="playerPaymentMethodForm.identificationType">
+                <option value="DNI">DNI</option>
+                <option value="CUIL">CUIL</option>
+                <option value="CUIT">CUIT</option>
+              </select>
+            </label>
+            <label>Numero de documento
+              <input name="createIdentificationNumber" [(ngModel)]="playerPaymentMethodForm.identificationNumber" required>
+            </label>
+          </div>
+          <label>Numero de tarjeta
+            <div class="mp-secure-field" id="playerCardNumberField"></div>
+          </label>
+          <div class="row">
+            <label>Vencimiento
+              <div class="mp-secure-field" id="playerCardExpirationField"></div>
+            </label>
+            <label>CVV
+              <div class="mp-secure-field" id="playerCardSecurityCodeField"></div>
+            </label>
+          </div>
+
+          <button type="submit" [disabled]="!selectedCreateSlot || isSavingPlayerCard">
+            {{ isSavingPlayerCard ? 'Autorizando...' : 'Crear turno y autorizar pago' }}
+          </button>
         </form>
       </article>
     </section>
@@ -421,56 +453,21 @@
     <section class="panel grid two" *ngIf="activeSection === 'payments' && isPlayer">
       <article class="card">
         <h2>Pagos</h2>
-        <p class="muted">Agrega una tarjeta para autorizar tu parte al crear o unirte a un turno. El cobro se captura automaticamente al finalizar si el turno se completa.</p>
-        <div class="notice" *ngIf="playerPaymentMethod?.canReserveAutomatically">
-          Tarjeta configurada{{ playerPaymentMethod?.lastFourDigits ? ' · termina en ' + playerPaymentMethod?.lastFourDigits : '' }}.
+        <p class="muted">Por seguridad, la tarjeta se tokeniza en el momento de crear o unirte a un turno. No guardamos tokens de tarjeta porque Mercado Pago los permite usar una sola vez.</p>
+        <div class="notice" *ngIf="playerPaymentMethod?.hasPaymentMethod">
+          Tienes un medio anterior guardado{{ playerPaymentMethod?.lastFourDigits ? ' · termina en ' + playerPaymentMethod?.lastFourDigits : '' }}. Puedes eliminarlo; ya no se usara para nuevas reservas.
         </div>
-        <div class="notice error" *ngIf="!playerPaymentMethod?.canReserveAutomatically">
-          Agrega una tarjeta para poder crear o unirte a turnos.
+        <div class="notice">
+          Al crear un turno, completa los datos de tarjeta en ese mismo formulario para autorizar la reserva.
         </div>
-
-        <form *ngIf="!playerPaymentMethod?.canReserveAutomatically" (ngSubmit)="savePlayerCardPaymentMethod()">
-          <label>Titular de la tarjeta
-            <input name="playerCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" required>
-          </label>
-          <div class="row">
-            <label>Tipo de documento
-              <select name="playerIdentificationType" [(ngModel)]="playerPaymentMethodForm.identificationType">
-                <option value="DNI">DNI</option>
-                <option value="CUIL">CUIL</option>
-                <option value="CUIT">CUIT</option>
-              </select>
-            </label>
-            <label>Numero de documento
-              <input name="playerIdentificationNumber" [(ngModel)]="playerPaymentMethodForm.identificationNumber" required>
-            </label>
-          </div>
-
-          <label>Numero de tarjeta
-            <div class="mp-secure-field" id="playerCardNumberField"></div>
-          </label>
-          <div class="row">
-            <label>Vencimiento
-              <div class="mp-secure-field" id="playerCardExpirationField"></div>
-            </label>
-            <label>CVV
-              <div class="mp-secure-field" id="playerCardSecurityCodeField"></div>
-            </label>
-          </div>
-
-          <button type="submit" [disabled]="isSavingPlayerCard || !playerPaymentConfig?.canTokenizeCards">
-            {{ isSavingPlayerCard ? 'Guardando...' : 'Agregar tarjeta' }}
-          </button>
-        </form>
-
         <p class="muted" *ngIf="!playerPaymentConfig?.canTokenizeCards">
           El administrador debe configurar la Public Key de Mercado Pago para habilitar tarjetas.
         </p>
 
         <div class="actions">
           <button type="button" class="secondary" (click)="loadPlayerPaymentConfig(); loadPlayerPaymentMethod()">Actualizar estado</button>
-          <button type="button" class="danger" *ngIf="playerPaymentMethod?.canReserveAutomatically" (click)="deletePlayerPaymentMethod()">
-            Eliminar tarjeta
+          <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasPaymentMethod" (click)="deletePlayerPaymentMethod()">
+            Eliminar medio anterior
           </button>
         </div>
       </article>

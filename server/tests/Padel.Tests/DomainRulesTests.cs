@@ -311,7 +311,7 @@ public sealed class DomainRulesTests
             Options.Create(new MercadoPagoOptions { SandboxPayerEmail = "buyer@testuser.com" }),
             new FakeNotifications());
 
-        var reservation = await service.ReservePlayerPaymentAsync(player, match.Id, CancellationToken.None);
+        var reservation = await service.ReservePlayerPaymentAsync(player, match.Id, null, CancellationToken.None);
         var payment = await db.Payments.SingleAsync();
 
         Assert.Equal(PaymentStatus.Authorized, reservation.Status);
@@ -369,7 +369,7 @@ public sealed class DomainRulesTests
             new FakeNotifications());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ReservePlayerPaymentAsync(player, match.Id, CancellationToken.None));
+            service.ReservePlayerPaymentAsync(player, match.Id, null, CancellationToken.None));
 
         Assert.Contains("Agrega una tarjeta", ex.Message);
         Assert.Empty(db.Payments);
@@ -635,13 +635,15 @@ public sealed class DomainRulesTests
 
     private static DateTime NextWeekdayUtc(DayOfWeek dayOfWeek, int hour)
     {
-        var date = DateOnly.FromDateTime(DateTime.UtcNow.Date).AddDays(1);
+        var now = DateTime.UtcNow;
+        var date = DateOnly.FromDateTime(now.Date);
         while (date.DayOfWeek != dayOfWeek)
         {
             date = date.AddDays(1);
         }
 
-        return date.ToDateTime(new TimeOnly(hour, 0), DateTimeKind.Utc);
+        var startsAt = date.ToDateTime(new TimeOnly(hour, 0), DateTimeKind.Utc);
+        return startsAt > now ? startsAt : startsAt.AddDays(7);
     }
 
     private sealed class FakeNotifications : INotificationService
@@ -672,7 +674,7 @@ public sealed class DomainRulesTests
             throw new NotSupportedException();
         }
 
-        public Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken)
+        public Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, PaymentAuthorizationRequest? authorization, CancellationToken cancellationToken)
         {
             return Task.FromResult(new PaymentPreferenceResponse(
                 Guid.NewGuid(),
