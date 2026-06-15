@@ -319,6 +319,7 @@ public sealed class DomainRulesTests
         Assert.Contains("\"capture\":false", httpHandler.LastRequestBody);
         Assert.Contains("\"token\":\"card-token\"", httpHandler.LastRequestBody);
         Assert.Contains("\"application_fee\":75", httpHandler.LastRequestBody);
+        Assert.Contains("\"processing_mode\":\"aggregator\"", httpHandler.LastRequestBody);
         Assert.Contains("\"email\":\"buyer@testuser.com\"", httpHandler.LastRequestBody);
         Assert.DoesNotContain("\"id\":\"customer-", httpHandler.LastRequestBody);
         Assert.Equal(payment.Id.ToString(), httpHandler.LastIdempotencyKey);

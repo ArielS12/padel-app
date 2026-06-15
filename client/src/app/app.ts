@@ -235,7 +235,7 @@ export class App implements OnInit, AfterViewInit {
   }
 
   get createPaymentPublicKey() {
-    return this.clubs.find(club => club.id === this.createTurnForm.clubId)?.mercadoPagoPublicKey;
+    return this.playerPaymentConfig?.publicKey;
   }
 
   get availableSlotsForSelectedCourt() {
