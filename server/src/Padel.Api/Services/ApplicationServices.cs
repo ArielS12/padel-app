@@ -1025,6 +1025,12 @@ public sealed class MercadoPagoService(
                 throw new InvalidOperationException("Mercado Pago Sandbox solo acepta emails de compradores de prueba. Configura MercadoPago:SandboxPayerEmail con el email de un test user comprador de Mercado Pago.");
             }
 
+            if (responseBody.Contains("application_fee", StringComparison.OrdinalIgnoreCase) &&
+                responseBody.Contains("processing_mode gateway", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Mercado Pago esta procesando este cobro en modo gateway y no permite application_fee. La aplicacion de Mercado Pago debe estar configurada como Marketplace/Split Payments y el dueño del club debe vincularse con OAuth desde esa misma aplicacion.");
+            }
+
             throw new InvalidOperationException($"Mercado Pago rechazo la reserva del pago ({(int)response.StatusCode}). {responseBody}");
         }
 
