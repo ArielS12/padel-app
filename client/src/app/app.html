@@ -521,7 +521,7 @@
           <label>Access Token plataforma
             <input name="mpPaymentsAccessToken" type="password" [(ngModel)]="mercadoPagoSettingsForm.accessToken" [placeholder]="mercadoPagoSettings?.hasAccessToken ? 'Token configurado. Completa solo si quieres reemplazarlo.' : 'APP_USR-... o TEST-... de tu aplicacion marketplace'">
           </label>
-          <p class="muted">Obligatorio para guardar tarjetas de jugadores. Lo encuentras en Mercado Pago → Tu integracion → Credenciales de produccion o prueba.</p>
+          <p class="muted">Obligatorio para guardar tarjetas de jugadores. Usa credenciales TEST para pruebas o APP_USR de produccion; Public Key y Access Token deben ser del mismo tipo.</p>
           <label>Application ID / Client ID
             <input name="mpPaymentsOAuthClientId" [(ngModel)]="mercadoPagoSettingsForm.oauthClientId" placeholder="Ej: 2578244267954252, no APP_USR...">
           </label>

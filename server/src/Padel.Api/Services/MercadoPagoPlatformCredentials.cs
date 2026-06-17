@@ -21,6 +21,24 @@ public static class MercadoPagoPlatformCredentials
             credential.StartsWith("APP_USR-", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static MercadoPagoEnvironment ResolveEffectiveEnvironment(
+        MercadoPagoSettings? settings,
+        string? accessToken,
+        string? publicKey)
+    {
+        if (IsLiveCredential(publicKey) && IsLiveCredential(accessToken))
+        {
+            return MercadoPagoEnvironment.Production;
+        }
+
+        if (IsTestCredential(publicKey) && IsTestCredential(accessToken))
+        {
+            return MercadoPagoEnvironment.Sandbox;
+        }
+
+        return settings?.Environment ?? MercadoPagoEnvironment.Sandbox;
+    }
+
     public static string? ValidateCardSaveCredentials(MercadoPagoSettings? settings, string accessToken)
     {
         var publicKey = settings?.PublicKey;
@@ -37,20 +55,6 @@ public static class MercadoPagoPlatformCredentials
         if (publicKeyIsLive && accessTokenIsTest)
         {
             return "La Public Key es de produccion y el Access Token es de prueba. Usa credenciales del mismo ambiente en Pagos.";
-        }
-
-        if (settings?.Environment == MercadoPagoEnvironment.Sandbox &&
-            publicKeyIsLive &&
-            accessTokenIsLive)
-        {
-            return "El ambiente esta en Sandbox pero las credenciales son de produccion. Cambia a credenciales TEST o configura el ambiente en Production.";
-        }
-
-        if (settings?.Environment == MercadoPagoEnvironment.Production &&
-            publicKeyIsTest &&
-            accessTokenIsTest)
-        {
-            return "El ambiente esta en Production pero las credenciales son de prueba. Usa credenciales APP_USR de produccion.";
         }
 
         return null;

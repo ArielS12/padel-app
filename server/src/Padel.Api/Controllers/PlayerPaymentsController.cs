@@ -25,9 +25,10 @@ public sealed class PlayerPaymentsController(
         var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
         var publicKey = settings?.PublicKey;
         var accessToken = MercadoPagoPlatformCredentials.ResolveAccessToken(settings, mercadoPagoOptions.Value);
+        var environment = MercadoPagoPlatformCredentials.ResolveEffectiveEnvironment(settings, accessToken, publicKey);
 
         return Ok(new PlayerPaymentConfigResponse(
-            settings?.Environment ?? MercadoPagoEnvironment.Sandbox,
+            environment,
             publicKey,
             !string.IsNullOrWhiteSpace(publicKey),
             !string.IsNullOrWhiteSpace(accessToken),
