@@ -429,24 +429,76 @@
     <section class="panel grid two" *ngIf="activeSection === 'payments' && isPlayer">
       <article class="card">
         <h2>Pagos</h2>
-        <p class="muted">Al crear o unirte a un turno se bloquea tu parte del importe. Cuando el turno finaliza, pagas manualmente con Checkout Pro de Mercado Pago.</p>
-        <div class="notice" *ngIf="playerPaymentMethod?.hasPaymentMethod && playerPaymentMethod?.linkType === 'Cuenta Mercado Pago'">
-          Cuenta de Mercado Pago vinculada{{ playerPaymentMethod?.mercadoPagoCustomerId ? ' · ID ' + playerPaymentMethod?.mercadoPagoCustomerId : '' }}.
+        <p class="muted">Al crear o unirte a un turno se bloquea tu parte del importe. Cuando el turno finaliza, pagas con Checkout Pro usando tu cuenta y tarjeta guardadas.</p>
+        <div class="notice" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked">
+          Cuenta de Mercado Pago vinculada: {{ playerPaymentMethod?.mercadoPagoAccountEmail }}.
+        </div>
+        <div class="notice" *ngIf="playerPaymentMethod?.hasSavedCard">
+          Tarjeta guardada: {{ playerPaymentMethod?.cardBrand }} terminada en {{ playerPaymentMethod?.lastFourDigits }}.
+        </div>
+        <div class="notice error" *ngIf="!playerPaymentMethod?.hasMercadoPagoAccountLinked">
+          Vincula tu cuenta de Mercado Pago para identificar el pagador en el checkout. Tu email de registro en la app puede ser distinto.
         </div>
         <div class="actions">
-          <button type="button" (click)="connectPlayerMercadoPagoAccount()">Vincular cuenta de Mercado Pago</button>
+          <button type="button" *ngIf="!playerPaymentMethod?.hasMercadoPagoAccountLinked" (click)="connectPlayerMercadoPagoAccount()">
+            Vincular cuenta de Mercado Pago
+          </button>
           <button type="button" class="secondary" (click)="loadPlayerPaymentConfig(); loadPlayerPaymentMethod()">Actualizar estado</button>
-          <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasPaymentMethod" (click)="deletePlayerPaymentMethod()">
+          <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasSavedCard" (click)="deletePlayerCard()">
+            Eliminar tarjeta
+          </button>
+          <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked" (click)="disconnectPlayerMercadoPagoAccount()">
             Desvincular cuenta
           </button>
         </div>
       </article>
 
-      <article class="card">
+      <article class="card" *ngIf="playerPaymentConfig?.canTokenizeCards">
+        <h2>Tarjeta guardada</h2>
+        <p class="muted">Guarda tu tarjeta una sola vez. Mercado Pago la mostrara en el checkout cuando pagues un turno finalizado.</p>
+        <div class="notice error" *ngIf="!playerPaymentMethod?.hasMercadoPagoAccountLinked">
+          Primero vincula tu cuenta de Mercado Pago.
+        </div>
+        <form (ngSubmit)="savePlayerCardPaymentMethod()" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked">
+          <label>Titular de la tarjeta
+            <input name="playerCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" autocomplete="cc-name" required>
+          </label>
+          <label>Numero de tarjeta
+            <div id="playerCardNumberField" class="mp-field"></div>
+          </label>
+          <label>Vencimiento
+            <div id="playerCardExpirationField" class="mp-field"></div>
+          </label>
+          <label>Codigo de seguridad
+            <div id="playerCardSecurityCodeField" class="mp-field"></div>
+          </label>
+          <label>Tipo de documento
+            <select name="playerIdentificationType" [(ngModel)]="playerPaymentMethodForm.identificationType">
+              <option value="DNI">DNI</option>
+              <option value="CI">CI</option>
+              <option value="LC">LC</option>
+              <option value="LE">LE</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </label>
+          <label>Numero de documento
+            <input name="playerIdentificationNumber" [(ngModel)]="playerPaymentMethodForm.identificationNumber" autocomplete="off" required>
+          </label>
+          <button type="submit" [disabled]="isSavingPlayerCard">
+            {{ isSavingPlayerCard ? 'Guardando tarjeta...' : (playerPaymentMethod?.hasSavedCard ? 'Reemplazar tarjeta' : 'Guardar tarjeta') }}
+          </button>
+        </form>
+        <p class="muted" *ngIf="!playerPaymentConfig?.canTokenizeCards">
+          El administrador debe configurar la Public Key de Mercado Pago para guardar tarjetas.
+        </p>
+      </article>
+
+      <article class="card" *ngIf="!playerPaymentConfig?.canTokenizeCards">
         <h2>Como funciona</h2>
-        <p class="muted">1. Te unes al turno y queda reservado tu importe.</p>
-        <p class="muted">2. Jugas el partido con los demas jugadores.</p>
-        <p class="muted">3. Al finalizar, recibes una notificacion y pagas en Mercado Pago con split al club y la plataforma.</p>
+        <p class="muted">1. Registrate con el email que prefieras.</p>
+        <p class="muted">2. Vincula tu cuenta de Mercado Pago y guarda tu tarjeta una sola vez.</p>
+        <p class="muted">3. Crea o unite a turnos sin ingresar datos de pago cada vez.</p>
+        <p class="muted">4. Al finalizar el turno, pagas con Checkout Pro.</p>
       </article>
     </section>
 
@@ -462,6 +514,9 @@
           </label>
           <label>Public Key plataforma
             <input name="mpPaymentsPublicKey" [(ngModel)]="mercadoPagoSettingsForm.publicKey" placeholder="Ej: APP_USR... o TEST...">
+          </label>
+          <label>Access Token plataforma
+            <input name="mpPaymentsAccessToken" type="password" [(ngModel)]="mercadoPagoSettingsForm.accessToken" [placeholder]="mercadoPagoSettings?.hasAccessToken ? 'Token configurado. Completa solo si quieres reemplazarlo.' : 'Necesario para guardar tarjetas de jugadores'">
           </label>
           <label>Application ID / Client ID
             <input name="mpPaymentsOAuthClientId" [(ngModel)]="mercadoPagoSettingsForm.oauthClientId" placeholder="Ej: 2578244267954252, no APP_USR...">

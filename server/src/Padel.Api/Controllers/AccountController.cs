@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using Padel.Api.Contracts;
 using Padel.Api.Data;
 using Padel.Api.Domain;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Padel.Api.Controllers;
@@ -182,7 +184,7 @@ public sealed class AccountController(
             return BadRequest($"Mercado Pago rechazo la vinculacion ({(int)response.StatusCode}). {body}");
         }
 
-        var token = await response.Content.ReadFromJsonAsync<MercadoPagoOAuthTokenResponse>(cancellationToken);
+        var token = JsonSerializer.Deserialize<MercadoPagoOAuthTokenResponse>(body);
         if (token is null || string.IsNullOrWhiteSpace(token.AccessToken))
         {
             return BadRequest("Mercado Pago no devolvio credenciales validas.");
@@ -191,7 +193,7 @@ public sealed class AccountController(
         var user = await userManager.FindByIdAsync(oauthState.UserId);
         if (user is null)
         {
-            return BadRequest("No se encontro el dueño de cancha vinculado a la solicitud.");
+            return BadRequest("No se encontro el usuario vinculado a la solicitud.");
         }
 
         if (oauthState.Purpose == PlayerOAuthPurpose)
@@ -199,6 +201,21 @@ public sealed class AccountController(
             if (token.UserId is null)
             {
                 return BadRequest("Mercado Pago no devolvio una cuenta valida.");
+            }
+
+            using var meRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.mercadopago.com/users/me");
+            meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+            var meResponse = await httpClient.SendAsync(meRequest, cancellationToken);
+            var meBody = await meResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!meResponse.IsSuccessStatusCode)
+            {
+                return BadRequest($"Mercado Pago no devolvio el perfil del comprador ({(int)meResponse.StatusCode}). {meBody}");
+            }
+
+            var profile = JsonSerializer.Deserialize<MercadoPagoUserProfileResponse>(meBody);
+            if (string.IsNullOrWhiteSpace(profile?.Email))
+            {
+                return BadRequest("Mercado Pago no devolvio el email de la cuenta vinculada.");
             }
 
             var method = await db.PlayerPaymentMethods.SingleOrDefaultAsync(x => x.UserId == user.Id, cancellationToken);
@@ -209,6 +226,7 @@ public sealed class AccountController(
             }
 
             method.MercadoPagoCustomerId = token.UserId.Value.ToString();
+            method.MercadoPagoAccountEmail = profile.Email;
             method.MercadoPagoCardId = null;
             method.CardToken = null;
             method.PaymentMethodId = MercadoPagoAccountMethod;
@@ -292,5 +310,11 @@ public sealed class AccountController(
 
         [JsonPropertyName("expires_in")]
         public int? ExpiresIn { get; set; }
+    }
+
+    private sealed class MercadoPagoUserProfileResponse
+    {
+        [JsonPropertyName("email")]
+        public string? Email { get; set; }
     }
 }

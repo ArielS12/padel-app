@@ -4,15 +4,18 @@ using Microsoft.EntityFrameworkCore;
 using Padel.Api.Contracts;
 using Padel.Api.Data;
 using Padel.Api.Domain;
+using Padel.Api.Services;
 
 namespace Padel.Api.Controllers;
 
 [Authorize(Roles = "Player")]
 [Route("api/player-payments")]
-public sealed class PlayerPaymentsController(AppDbContext db) : ApiControllerBase
+public sealed class PlayerPaymentsController(
+    AppDbContext db,
+    IMercadoPagoCustomerCardService customerCardService) : ApiControllerBase
 {
-    private const string MercadoPagoAccountMethod = "mercadopago_account";
     private const string PlayerOAuthPurpose = "Player";
+    private const string MercadoPagoAccountMethod = "mercadopago_account";
 
     [HttpGet("/api/player-payments/config")]
     public async Task<ActionResult<PlayerPaymentConfigResponse>> GetConfig(CancellationToken cancellationToken)
@@ -41,36 +44,87 @@ public sealed class PlayerPaymentsController(AppDbContext db) : ApiControllerBas
     [HttpPost("/api/player-payments/method")]
     public async Task<ActionResult<PlayerPaymentMethodResponse>> UpsertMethod(UpsertPlayerPaymentMethodRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.PaymentMethodId))
+        if (string.IsNullOrWhiteSpace(request.CardToken))
         {
-            return ValidationProblem("Debes indicar el metodo de pago de Mercado Pago.");
+            return ValidationProblem("Debes indicar el token de la tarjeta.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.MercadoPagoCardId) && string.IsNullOrWhiteSpace(request.CardToken))
+        var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        if (string.IsNullOrWhiteSpace(settings?.AccessToken))
         {
-            return ValidationProblem("Debes indicar un token o una tarjeta guardada de Mercado Pago.");
+            return BadRequest("El administrador debe configurar el Access Token de Mercado Pago para guardar tarjetas.");
         }
 
         var method = await db.PlayerPaymentMethods
             .SingleOrDefaultAsync(x => x.UserId == CurrentUserId, cancellationToken);
 
-        if (method is null)
+        if (method is null || string.IsNullOrWhiteSpace(method.MercadoPagoAccountEmail))
         {
-            method = new PlayerPaymentMethod
-            {
-                UserId = CurrentUserId
-            };
-            db.PlayerPaymentMethods.Add(method);
+            return BadRequest("Vincula tu cuenta de Mercado Pago antes de guardar una tarjeta.");
         }
 
-        method.MercadoPagoCustomerId = request.MercadoPagoCustomerId;
-        method.MercadoPagoCardId = request.MercadoPagoCardId;
-        method.CardToken = request.CardToken;
-        method.PaymentMethodId = request.PaymentMethodId;
-        method.CardBrand = request.CardBrand;
-        method.LastFourDigits = request.LastFourDigits;
+        var savedCard = await customerCardService.SaveCardAsync(
+            method.MercadoPagoAccountEmail,
+            method.MercadoPagoCustomerId,
+            request.CardToken,
+            settings.AccessToken,
+            cancellationToken);
+
+        method.MercadoPagoCustomerId = savedCard.CustomerId;
+        method.MercadoPagoCardId = savedCard.CardId;
+        method.CardToken = null;
+        method.PaymentMethodId = savedCard.PaymentMethodId;
+        method.CardBrand = request.CardBrand ?? savedCard.CardBrand;
+        method.LastFourDigits = request.LastFourDigits ?? savedCard.LastFourDigits;
         method.IsActive = true;
         method.LinkedAtUtc = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(ToResponse(method));
+    }
+
+    [HttpDelete("/api/player-payments/method/card")]
+    public async Task<ActionResult<PlayerPaymentMethodResponse>> DeleteCard(CancellationToken cancellationToken)
+    {
+        var method = await db.PlayerPaymentMethods
+            .SingleOrDefaultAsync(x => x.UserId == CurrentUserId && x.IsActive, cancellationToken);
+        if (method is null || string.IsNullOrWhiteSpace(method.MercadoPagoCardId))
+        {
+            return Ok(ToResponse(method));
+        }
+
+        var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(settings?.AccessToken) &&
+            !string.IsNullOrWhiteSpace(method.MercadoPagoCustomerId))
+        {
+            try
+            {
+                await customerCardService.DeleteCardAsync(
+                    method.MercadoPagoCustomerId,
+                    method.MercadoPagoCardId,
+                    settings.AccessToken,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                // Si Mercado Pago ya no tiene la tarjeta, igual limpiamos el registro local.
+            }
+        }
+
+        method.MercadoPagoCardId = null;
+        method.CardToken = null;
+        if (string.IsNullOrWhiteSpace(method.MercadoPagoAccountEmail))
+        {
+            method.PaymentMethodId = string.Empty;
+            method.CardBrand = null;
+            method.LastFourDigits = null;
+        }
+        else
+        {
+            method.PaymentMethodId = MercadoPagoAccountMethod;
+            method.CardBrand = "Mercado Pago";
+            method.LastFourDigits = null;
+        }
 
         await db.SaveChangesAsync(cancellationToken);
         return Ok(ToResponse(method));
@@ -83,8 +137,32 @@ public sealed class PlayerPaymentsController(AppDbContext db) : ApiControllerBas
             .SingleOrDefaultAsync(x => x.UserId == CurrentUserId, cancellationToken);
         if (method is not null)
         {
+            var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(method.MercadoPagoCardId) &&
+                !string.IsNullOrWhiteSpace(method.MercadoPagoCustomerId) &&
+                !string.IsNullOrWhiteSpace(settings?.AccessToken))
+            {
+                try
+                {
+                    await customerCardService.DeleteCardAsync(
+                        method.MercadoPagoCustomerId,
+                        method.MercadoPagoCardId,
+                        settings.AccessToken,
+                        cancellationToken);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+
             method.IsActive = false;
             method.CardToken = null;
+            method.MercadoPagoCustomerId = null;
+            method.MercadoPagoAccountEmail = null;
+            method.MercadoPagoCardId = null;
+            method.PaymentMethodId = string.Empty;
+            method.CardBrand = null;
+            method.LastFourDigits = null;
             await db.SaveChangesAsync(cancellationToken);
         }
 
@@ -130,22 +208,20 @@ public sealed class PlayerPaymentsController(AppDbContext db) : ApiControllerBas
 
     private static PlayerPaymentMethodResponse ToResponse(PlayerPaymentMethod? method)
     {
-        var isCardMethod = method?.PaymentMethodId != MercadoPagoAccountMethod;
-        var canReserveAutomatically = method?.IsActive == true &&
-            isCardMethod &&
-            (!string.IsNullOrWhiteSpace(method.MercadoPagoCardId) ||
-                !string.IsNullOrWhiteSpace(method.CardToken));
+        var hasMercadoPagoAccountLinked = method?.IsActive == true &&
+            !string.IsNullOrWhiteSpace(method.MercadoPagoAccountEmail);
+        var hasSavedCard = method?.IsActive == true &&
+            !string.IsNullOrWhiteSpace(method.MercadoPagoCardId);
 
         return new PlayerPaymentMethodResponse(
-            method?.IsActive == true,
-            canReserveAutomatically,
-            method?.PaymentMethodId == MercadoPagoAccountMethod ? "Cuenta Mercado Pago" : method is null ? null : "Tarjeta",
+            hasMercadoPagoAccountLinked || hasSavedCard,
+            hasMercadoPagoAccountLinked,
+            hasSavedCard,
+            method?.MercadoPagoAccountEmail,
             method?.MercadoPagoCustomerId,
-            method?.MercadoPagoCardId,
-            method?.PaymentMethodId,
-            method?.CardBrand,
-            method?.LastFourDigits,
+            hasSavedCard ? method?.PaymentMethodId : null,
+            hasSavedCard ? method?.CardBrand : null,
+            hasSavedCard ? method?.LastFourDigits : null,
             method?.LinkedAtUtc);
     }
-
 }

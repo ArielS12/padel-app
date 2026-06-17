@@ -81,6 +81,7 @@ builder.Services.AddScoped<IMatchService, MatchService>();
 builder.Services.AddScoped<IPasswordHasher<Club>, PasswordHasher<Club>>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IMercadoPagoService, MercadoPagoService>();
+builder.Services.AddScoped<IMercadoPagoCustomerCardService, MercadoPagoCustomerCardService>();
 builder.Services.AddHostedService<MatchCancellationWorker>();
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi

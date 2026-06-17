@@ -218,6 +218,10 @@ export class ApiService {
     return this.http.delete<PlayerPaymentMethodResponse>(`${this.baseUrl}/player-payments/method`);
   }
 
+  deletePlayerCard() {
+    return this.http.delete<PlayerPaymentMethodResponse>(`${this.baseUrl}/player-payments/method/card`);
+  }
+
   updatePayment(providerPaymentId: string, status: PaymentStatus) {
     return this.http.post<void>(`${this.baseUrl}/payments/mercadopago/webhook`, { providerPaymentId, status });
   }

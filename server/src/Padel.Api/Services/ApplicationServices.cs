@@ -822,6 +822,7 @@ public sealed class MercadoPagoService(
 
         payment.ProviderPreferenceId = null;
         payment.CheckoutUrl = null;
+        await EnsurePlayerCanPayAsync(user, cancellationToken);
         return await CreateCheckoutPreferenceAsync(user, match, payment, cancellationToken);
     }
 
@@ -902,10 +903,7 @@ public sealed class MercadoPagoService(
             },
             ["marketplace_fee"] = payment.AdminFeeAmount,
             ["external_reference"] = payment.Id.ToString(),
-            ["payer"] = new Dictionary<string, object?>
-            {
-                ["email"] = GetPaymentPayerEmail(user, environment)
-            },
+            ["payer"] = await BuildCheckoutPayerAsync(user, environment, cancellationToken),
             ["back_urls"] = new
             {
                 success = FirstNotEmpty(settings?.SuccessUrl, options.Value.SuccessUrl),
@@ -1076,15 +1074,59 @@ public sealed class MercadoPagoService(
         return completed;
     }
 
-    private string? GetPaymentPayerEmail(ApplicationUser user, MercadoPagoEnvironment environment)
+    private async Task EnsurePlayerCanPayAsync(ApplicationUser user, CancellationToken cancellationToken)
     {
+        var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        var environment = settings?.Environment ?? MercadoPagoEnvironment.Sandbox;
+        if (environment == MercadoPagoEnvironment.Sandbox)
+        {
+            return;
+        }
+
+        var method = await db.PlayerPaymentMethods.SingleOrDefaultAsync(x => x.UserId == user.Id && x.IsActive, cancellationToken);
+        if (string.IsNullOrWhiteSpace(method?.MercadoPagoAccountEmail))
+        {
+            throw new InvalidOperationException("Debes vincular tu cuenta de Mercado Pago en la seccion Pagos antes de pagar.");
+        }
+    }
+
+    private async Task<Dictionary<string, object?>> BuildCheckoutPayerAsync(
+        ApplicationUser user,
+        MercadoPagoEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        var payer = new Dictionary<string, object?>
+        {
+            ["email"] = await ResolvePayerEmailAsync(user, environment, cancellationToken)
+        };
+
+        var method = await db.PlayerPaymentMethods.SingleOrDefaultAsync(x => x.UserId == user.Id && x.IsActive, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(method?.MercadoPagoCustomerId))
+        {
+            payer["id"] = method.MercadoPagoCustomerId;
+        }
+
+        return payer;
+    }
+
+    private async Task<string> ResolvePayerEmailAsync(
+        ApplicationUser user,
+        MercadoPagoEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        var method = await db.PlayerPaymentMethods.SingleOrDefaultAsync(x => x.UserId == user.Id && x.IsActive, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(method?.MercadoPagoAccountEmail))
+        {
+            return method.MercadoPagoAccountEmail;
+        }
+
         if (environment == MercadoPagoEnvironment.Sandbox &&
             !string.IsNullOrWhiteSpace(options.Value.SandboxPayerEmail))
         {
             return options.Value.SandboxPayerEmail;
         }
 
-        return user.Email;
+        throw new InvalidOperationException("Debes vincular tu cuenta de Mercado Pago en la seccion Pagos antes de pagar.");
     }
 
     private static string? FirstNotEmpty(params string?[] values)

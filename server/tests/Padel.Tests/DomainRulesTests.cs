@@ -413,6 +413,140 @@ public sealed class DomainRulesTests
         Assert.Single(notifications.DuePayments);
     }
 
+    [Fact]
+    public async Task MercadoPagoService_UsesLinkedMercadoPagoEmailForCheckout()
+    {
+        await using var db = CreateDbContext();
+        var court = await SeedApprovedClubAsync(db);
+        var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
+        owner.MercadoPagoAccessToken = "owner-token";
+        var player = CreateUser("payer@test.local");
+        player.Email = "registro@miapp.com";
+        var startsAt = NextWeekdayUtc(DayOfWeek.Monday, 10);
+        var booking = new CourtBooking
+        {
+            CourtId = court.Id,
+            StartsAtUtc = startsAt,
+            EndsAtUtc = startsAt.AddMinutes(90)
+        };
+        db.Users.Add(player);
+        db.CourtBookings.Add(booking);
+        db.PlayerPaymentMethods.Add(new PlayerPaymentMethod
+        {
+            UserId = player.Id,
+            MercadoPagoCustomerId = "3464419562",
+            MercadoPagoAccountEmail = "comprador@mercadopago.com",
+            PaymentMethodId = "mercadopago_account",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            MatchId = Guid.NewGuid(),
+            UserId = player.Id,
+            Amount = 2500m,
+            OwnerAmount = 2325m,
+            AdminFeeAmount = 75m,
+            ProcessingReserveAmount = 100m,
+            Status = PaymentStatus.Due
+        };
+        var match = new PadelMatch
+        {
+            Id = payment.MatchId,
+            CreatorId = player.Id,
+            CourtId = court.Id,
+            CourtBookingId = booking.Id,
+            StartsAtUtc = booking.StartsAtUtc,
+            EndsAtUtc = booking.EndsAtUtc,
+            RequiredCategory = SkillCategory.Sexta,
+            RequiredLevel = SkillLevel.Bajo,
+            Status = MatchStatus.Completed,
+            Players =
+            {
+                new MatchPlayer { UserId = player.Id, TeamNumber = 1 }
+            },
+            Payments = { payment }
+        };
+        db.Matches.Add(match);
+        await db.SaveChangesAsync();
+
+        var httpHandler = new FakeMercadoPagoHandler();
+        var service = new MercadoPagoService(
+            db,
+            new HttpClient(httpHandler),
+            Options.Create(new MercadoPagoOptions { SandboxPayerEmail = "buyer@testuser.com" }),
+            new FakeNotifications());
+
+        await service.CreatePreferenceAsync(player, match.Id, CancellationToken.None);
+
+        Assert.Contains("\"email\":\"comprador@mercadopago.com\"", httpHandler.LastRequestBody);
+        Assert.DoesNotContain("\"email\":\"registro@miapp.com\"", httpHandler.LastRequestBody);
+        Assert.DoesNotContain("\"email\":\"buyer@testuser.com\"", httpHandler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task MercadoPagoService_RequiresLinkedAccountInProduction()
+    {
+        await using var db = CreateDbContext();
+        var court = await SeedApprovedClubAsync(db);
+        var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
+        owner.MercadoPagoAccessToken = "owner-token";
+        db.MercadoPagoSettings.Add(new MercadoPagoSettings { Environment = MercadoPagoEnvironment.Production });
+        var player = CreateUser("payer@test.local");
+        var startsAt = NextWeekdayUtc(DayOfWeek.Monday, 10);
+        var booking = new CourtBooking
+        {
+            CourtId = court.Id,
+            StartsAtUtc = startsAt,
+            EndsAtUtc = startsAt.AddMinutes(90)
+        };
+        db.Users.Add(player);
+        db.CourtBookings.Add(booking);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            MatchId = Guid.NewGuid(),
+            UserId = player.Id,
+            Amount = 2500m,
+            OwnerAmount = 2325m,
+            AdminFeeAmount = 75m,
+            ProcessingReserveAmount = 100m,
+            Status = PaymentStatus.Due
+        };
+        var match = new PadelMatch
+        {
+            Id = payment.MatchId,
+            CreatorId = player.Id,
+            CourtId = court.Id,
+            CourtBookingId = booking.Id,
+            StartsAtUtc = booking.StartsAtUtc,
+            EndsAtUtc = booking.EndsAtUtc,
+            RequiredCategory = SkillCategory.Sexta,
+            RequiredLevel = SkillLevel.Bajo,
+            Status = MatchStatus.Completed,
+            Players =
+            {
+                new MatchPlayer { UserId = player.Id, TeamNumber = 1 }
+            },
+            Payments = { payment }
+        };
+        db.Matches.Add(match);
+        await db.SaveChangesAsync();
+
+        var service = new MercadoPagoService(
+            db,
+            new HttpClient(new FakeMercadoPagoHandler()),
+            Options.Create(new MercadoPagoOptions()),
+            new FakeNotifications());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreatePreferenceAsync(player, match.Id, CancellationToken.None));
+
+        Assert.Contains("vincular tu cuenta de Mercado Pago", ex.Message);
+    }
+
     private static AppDbContext CreateDbContext()
     {
         return new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()

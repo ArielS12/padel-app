@@ -131,10 +131,10 @@ export interface PaymentPreferenceResponse {
 
 export interface PlayerPaymentMethodResponse {
   hasPaymentMethod: boolean;
-  canReserveAutomatically: boolean;
-  linkType?: string;
+  hasMercadoPagoAccountLinked: boolean;
+  hasSavedCard: boolean;
+  mercadoPagoAccountEmail?: string;
   mercadoPagoCustomerId?: string;
-  mercadoPagoCardId?: string;
   paymentMethodId?: string;
   cardBrand?: string;
   lastFourDigits?: string;

@@ -166,6 +166,7 @@ public sealed class PlayerPaymentMethod
     public string UserId { get; set; } = string.Empty;
     public ApplicationUser User { get; set; } = null!;
     public string? MercadoPagoCustomerId { get; set; }
+    public string? MercadoPagoAccountEmail { get; set; }
     public string? MercadoPagoCardId { get; set; }
     public string? CardToken { get; set; }
     public string PaymentMethodId { get; set; } = string.Empty;

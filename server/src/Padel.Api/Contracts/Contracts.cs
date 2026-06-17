@@ -168,10 +168,10 @@ public sealed record PaymentPreferenceResponse(
 
 public sealed record PlayerPaymentMethodResponse(
     bool HasPaymentMethod,
-    bool CanReserveAutomatically,
-    string? LinkType,
+    bool HasMercadoPagoAccountLinked,
+    bool HasSavedCard,
+    string? MercadoPagoAccountEmail,
     string? MercadoPagoCustomerId,
-    string? MercadoPagoCardId,
     string? PaymentMethodId,
     string? CardBrand,
     string? LastFourDigits,

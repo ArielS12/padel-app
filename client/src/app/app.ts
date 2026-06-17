@@ -239,6 +239,14 @@ export class App implements OnInit, AfterViewInit {
     return club?.mercadoPagoPublicKey ?? this.playerPaymentConfig?.publicKey;
   }
 
+  get cardFieldsPublicKey() {
+    if (this.activeSection === 'payments') {
+      return this.playerPaymentConfig?.publicKey;
+    }
+
+    return this.createPaymentPublicKey;
+  }
+
   get availableSlotsForSelectedCourt() {
     return this.availability.filter(slot =>
       slot.courtId === this.createTurnForm.courtId &&
@@ -413,6 +421,7 @@ export class App implements OnInit, AfterViewInit {
       if (this.isPlayer) {
         this.loadPlayerPaymentConfig();
         this.loadPlayerPaymentMethod();
+        window.setTimeout(() => this.initializeMercadoPagoCardFields());
       }
     }
   }
@@ -663,9 +672,9 @@ export class App implements OnInit, AfterViewInit {
           securityCode: '',
           identificationType: 'DNI',
           identificationNumber: '',
-          paymentMethodId: method.paymentMethodId ?? 'visa',
-          cardBrand: method.cardBrand ?? '',
-          lastFourDigits: method.lastFourDigits ?? ''
+          paymentMethodId: 'visa',
+          cardBrand: '',
+          lastFourDigits: ''
         };
       },
       error: error => this.showError(error)
@@ -727,6 +736,11 @@ export class App implements OnInit, AfterViewInit {
   }
 
   async savePlayerCardPaymentMethod() {
+    if (!this.playerPaymentMethod?.hasMercadoPagoAccountLinked) {
+      this.showError({ message: 'Vincula tu cuenta de Mercado Pago antes de guardar una tarjeta.' });
+      return;
+    }
+
     if (!this.playerPaymentConfig?.canTokenizeCards || !this.playerPaymentConfig.publicKey) {
       this.showError({ message: 'El administrador debe configurar la Public Key de Mercado Pago para cargar tarjetas.' });
       return;
@@ -770,8 +784,25 @@ export class App implements OnInit, AfterViewInit {
     }
   }
 
-  deletePlayerPaymentMethod() {
-    if (!confirm('Vas a eliminar tu tarjeta. No podras crear ni unirte a turnos hasta agregar una nueva.')) {
+  deletePlayerCard() {
+    if (!confirm('Vas a eliminar tu tarjeta guardada.')) {
+      return;
+    }
+
+    this.api.deletePlayerCard().subscribe({
+      next: method => {
+        this.playerPaymentMethod = method;
+        this.clearPlayerCardForm();
+        this.resetMercadoPagoCardFields();
+        window.setTimeout(() => this.initializeMercadoPagoCardFields());
+        this.setMessage('Tarjeta eliminada.');
+      },
+      error: error => this.showError(error)
+    });
+  }
+
+  disconnectPlayerMercadoPagoAccount() {
+    if (!confirm('Vas a desvincular tu cuenta de Mercado Pago y eliminar la tarjeta guardada.')) {
       return;
     }
 
@@ -792,7 +823,7 @@ export class App implements OnInit, AfterViewInit {
         };
         this.resetMercadoPagoCardFields();
         window.setTimeout(() => this.initializeMercadoPagoCardFields());
-        this.setMessage('Tarjeta eliminada.');
+        this.setMessage('Cuenta de Mercado Pago desvinculada.');
       },
       error: error => this.showError(error)
     });
@@ -953,6 +984,14 @@ export class App implements OnInit, AfterViewInit {
   }
 
   payMatch(match: MatchResponse) {
+    if (this.playerPaymentConfig?.environment === 'Production' && !this.playerPaymentMethod?.hasMercadoPagoAccountLinked) {
+      this.activeSection = 'payments';
+      this.loadPlayerPaymentConfig();
+      this.loadPlayerPaymentMethod();
+      this.showError({ message: 'Vincula tu cuenta de Mercado Pago en la seccion Pagos antes de pagar.' });
+      return;
+    }
+
     this.api.createPaymentPreference(match.id).subscribe({
       next: payment => {
         this.lastPayment = payment;
@@ -1274,7 +1313,7 @@ export class App implements OnInit, AfterViewInit {
   }
 
   private async initializeMercadoPagoCardFields() {
-    const publicKey = this.createPaymentPublicKey;
+    const publicKey = this.cardFieldsPublicKey;
     if (!publicKey) {
       return;
     }
