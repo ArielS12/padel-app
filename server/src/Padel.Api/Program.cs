@@ -62,7 +62,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Angular", policy =>
-        policy.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:4200"])
+        policy.SetIsOriginAllowed(IsAllowedCorsOrigin)
             .AllowAnyHeader()
             .AllowAnyMethod());
 });
@@ -96,8 +96,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
 app.UseCors("Angular");
+app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -159,6 +159,26 @@ static async Task InitializeDatabaseAsync(WebApplication app, string databasePro
     }
 
     await SeedData.InitializeAsync(app.Services, app.Configuration, app.Environment);
+}
+
+static bool IsAllowedCorsOrigin(string origin)
+{
+    if (string.IsNullOrWhiteSpace(origin) || !Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+    {
+        return false;
+    }
+
+    if (uri.Scheme is not ("http" or "https"))
+    {
+        return false;
+    }
+
+    if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return uri.Host.EndsWith(".onrender.com", StringComparison.OrdinalIgnoreCase);
 }
 
 public partial class Program;

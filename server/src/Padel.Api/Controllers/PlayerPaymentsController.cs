@@ -68,12 +68,20 @@ public sealed class PlayerPaymentsController(
             return BadRequest("Vincula tu cuenta de Mercado Pago antes de guardar una tarjeta.");
         }
 
-        var savedCard = await customerCardService.SaveCardAsync(
-            method.MercadoPagoAccountEmail,
-            method.MercadoPagoCustomerId,
-            request.CardToken,
-            accessToken,
-            cancellationToken);
+        MercadoPagoSavedCardResult savedCard;
+        try
+        {
+            savedCard = await customerCardService.SaveCardAsync(
+                method.MercadoPagoAccountEmail,
+                method.MercadoPagoCustomerId,
+                request.CardToken,
+                accessToken,
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
 
         method.MercadoPagoCustomerId = savedCard.CustomerId;
         method.MercadoPagoCardId = savedCard.CardId;
