@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Padel.Api.Contracts;
 using Padel.Api.Data;
 using Padel.Api.Domain;
@@ -12,7 +13,8 @@ namespace Padel.Api.Controllers;
 [Route("api/player-payments")]
 public sealed class PlayerPaymentsController(
     AppDbContext db,
-    IMercadoPagoCustomerCardService customerCardService) : ApiControllerBase
+    IMercadoPagoCustomerCardService customerCardService,
+    IOptions<MercadoPagoOptions> mercadoPagoOptions) : ApiControllerBase
 {
     private const string PlayerOAuthPurpose = "Player";
     private const string MercadoPagoAccountMethod = "mercadopago_account";
@@ -22,11 +24,13 @@ public sealed class PlayerPaymentsController(
     {
         var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
         var publicKey = settings?.PublicKey;
+        var accessToken = MercadoPagoPlatformCredentials.ResolveAccessToken(settings, mercadoPagoOptions.Value);
 
         return Ok(new PlayerPaymentConfigResponse(
             settings?.Environment ?? MercadoPagoEnvironment.Sandbox,
             publicKey,
             !string.IsNullOrWhiteSpace(publicKey),
+            !string.IsNullOrWhiteSpace(accessToken),
             !string.IsNullOrWhiteSpace(settings?.OAuthClientId) &&
             !string.IsNullOrWhiteSpace(settings.OAuthClientSecret) &&
             !string.IsNullOrWhiteSpace(settings.OAuthRedirectUrl)));
@@ -50,7 +54,8 @@ public sealed class PlayerPaymentsController(
         }
 
         var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
-        if (string.IsNullOrWhiteSpace(settings?.AccessToken))
+        var accessToken = MercadoPagoPlatformCredentials.ResolveAccessToken(settings, mercadoPagoOptions.Value);
+        if (string.IsNullOrWhiteSpace(accessToken))
         {
             return BadRequest("El administrador debe configurar el Access Token de Mercado Pago para guardar tarjetas.");
         }
@@ -67,7 +72,7 @@ public sealed class PlayerPaymentsController(
             method.MercadoPagoAccountEmail,
             method.MercadoPagoCustomerId,
             request.CardToken,
-            settings.AccessToken,
+            accessToken,
             cancellationToken);
 
         method.MercadoPagoCustomerId = savedCard.CustomerId;
@@ -94,7 +99,8 @@ public sealed class PlayerPaymentsController(
         }
 
         var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(settings?.AccessToken) &&
+        var accessToken = MercadoPagoPlatformCredentials.ResolveAccessToken(settings, mercadoPagoOptions.Value);
+        if (!string.IsNullOrWhiteSpace(accessToken) &&
             !string.IsNullOrWhiteSpace(method.MercadoPagoCustomerId))
         {
             try
@@ -102,7 +108,7 @@ public sealed class PlayerPaymentsController(
                 await customerCardService.DeleteCardAsync(
                     method.MercadoPagoCustomerId,
                     method.MercadoPagoCardId,
-                    settings.AccessToken,
+                    accessToken,
                     cancellationToken);
             }
             catch (InvalidOperationException)
@@ -138,16 +144,17 @@ public sealed class PlayerPaymentsController(
         if (method is not null)
         {
             var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+            var accessToken = MercadoPagoPlatformCredentials.ResolveAccessToken(settings, mercadoPagoOptions.Value);
             if (!string.IsNullOrWhiteSpace(method.MercadoPagoCardId) &&
                 !string.IsNullOrWhiteSpace(method.MercadoPagoCustomerId) &&
-                !string.IsNullOrWhiteSpace(settings?.AccessToken))
+                !string.IsNullOrWhiteSpace(accessToken))
             {
                 try
                 {
                     await customerCardService.DeleteCardAsync(
                         method.MercadoPagoCustomerId,
                         method.MercadoPagoCardId,
-                        settings.AccessToken,
+                        accessToken,
                         cancellationToken);
                 }
                 catch (InvalidOperationException)

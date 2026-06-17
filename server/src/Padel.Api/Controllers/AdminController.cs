@@ -1,14 +1,16 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Padel.Api.Contracts;
 using Padel.Api.Data;
 using Padel.Api.Domain;
+using Padel.Api.Services;
 
 namespace Padel.Api.Controllers;
 
 [Authorize(Roles = "Admin")]
-public sealed class AdminController(AppDbContext db) : ApiControllerBase
+public sealed class AdminController(AppDbContext db, IOptions<MercadoPagoOptions> mercadoPagoOptions) : ApiControllerBase
 {
     [HttpGet("clubs/pending")]
     public async Task<ActionResult<IReadOnlyCollection<ClubResponse>>> PendingClubs(CancellationToken cancellationToken)
@@ -39,7 +41,7 @@ public sealed class AdminController(AppDbContext db) : ApiControllerBase
     public async Task<ActionResult<MercadoPagoSettingsResponse>> GetMercadoPagoSettings(CancellationToken cancellationToken)
     {
         var settings = await GetOrCreateMercadoPagoSettingsAsync(cancellationToken);
-        return Ok(ToResponse(settings));
+        return Ok(ToMercadoPagoSettingsResponse(settings));
     }
 
     [HttpPut("mercadopago")]
@@ -74,7 +76,7 @@ public sealed class AdminController(AppDbContext db) : ApiControllerBase
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(ToResponse(settings));
+        return Ok(ToMercadoPagoSettingsResponse(settings));
     }
 
     private async Task<IActionResult> SetClubStatus(Guid clubId, ClubStatus status, CancellationToken cancellationToken)
@@ -113,14 +115,15 @@ public sealed class AdminController(AppDbContext db) : ApiControllerBase
         return settings;
     }
 
-    private static MercadoPagoSettingsResponse ToResponse(MercadoPagoSettings settings)
+    private MercadoPagoSettingsResponse ToMercadoPagoSettingsResponse(MercadoPagoSettings settings)
     {
+        var accessToken = MercadoPagoPlatformCredentials.ResolveAccessToken(settings, mercadoPagoOptions.Value);
         return new MercadoPagoSettingsResponse(
             settings.Environment,
             settings.PublicKey,
             settings.OAuthClientId,
             settings.OAuthRedirectUrl,
-            !string.IsNullOrWhiteSpace(settings.AccessToken),
+            !string.IsNullOrWhiteSpace(accessToken),
             !string.IsNullOrWhiteSpace(settings.OAuthClientSecret),
             settings.SuccessUrl,
             settings.FailureUrl,

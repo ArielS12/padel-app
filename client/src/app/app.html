@@ -459,7 +459,10 @@
         <div class="notice error" *ngIf="!playerPaymentMethod?.hasMercadoPagoAccountLinked">
           Primero vincula tu cuenta de Mercado Pago.
         </div>
-        <form (ngSubmit)="savePlayerCardPaymentMethod()" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked">
+        <div class="notice error" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked && !playerPaymentConfig?.canSaveCards">
+          El administrador aun no configuro el Access Token de Mercado Pago. Sin eso no se pueden guardar tarjetas (puedes pagar igual en el checkout al finalizar el turno).
+        </div>
+        <form (ngSubmit)="savePlayerCardPaymentMethod()" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked && playerPaymentConfig?.canSaveCards">
           <label>Titular de la tarjeta
             <input name="playerCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" autocomplete="cc-name" required>
           </label>
@@ -516,8 +519,9 @@
             <input name="mpPaymentsPublicKey" [(ngModel)]="mercadoPagoSettingsForm.publicKey" placeholder="Ej: APP_USR... o TEST...">
           </label>
           <label>Access Token plataforma
-            <input name="mpPaymentsAccessToken" type="password" [(ngModel)]="mercadoPagoSettingsForm.accessToken" [placeholder]="mercadoPagoSettings?.hasAccessToken ? 'Token configurado. Completa solo si quieres reemplazarlo.' : 'Necesario para guardar tarjetas de jugadores'">
+            <input name="mpPaymentsAccessToken" type="password" [(ngModel)]="mercadoPagoSettingsForm.accessToken" [placeholder]="mercadoPagoSettings?.hasAccessToken ? 'Token configurado. Completa solo si quieres reemplazarlo.' : 'APP_USR-... o TEST-... de tu aplicacion marketplace'">
           </label>
+          <p class="muted">Obligatorio para guardar tarjetas de jugadores. Lo encuentras en Mercado Pago → Tu integracion → Credenciales de produccion o prueba.</p>
           <label>Application ID / Client ID
             <input name="mpPaymentsOAuthClientId" [(ngModel)]="mercadoPagoSettingsForm.oauthClientId" placeholder="Ej: 2578244267954252, no APP_USR...">
           </label>

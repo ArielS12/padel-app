@@ -145,6 +145,7 @@ export interface PlayerPaymentConfigResponse {
   environment: MercadoPagoEnvironment;
   publicKey?: string;
   canTokenizeCards: boolean;
+  canSaveCards: boolean;
   canConnectMercadoPagoAccount: boolean;
 }
 

@@ -29,6 +29,8 @@ services:
         sync: false
       - key: Seed__AdminPassword
         sync: false
+      - key: MercadoPago__AccessToken
+        sync: false
 
   - type: web
     name: padel-client

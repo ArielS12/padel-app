@@ -741,6 +741,11 @@ export class App implements OnInit, AfterViewInit {
       return;
     }
 
+    if (!this.playerPaymentConfig?.canSaveCards) {
+      this.showError({ message: 'El administrador debe configurar el Access Token de Mercado Pago en Pagos para habilitar tarjetas guardadas.' });
+      return;
+    }
+
     if (!this.playerPaymentConfig?.canTokenizeCards || !this.playerPaymentConfig.publicKey) {
       this.showError({ message: 'El administrador debe configurar la Public Key de Mercado Pago para cargar tarjetas.' });
       return;

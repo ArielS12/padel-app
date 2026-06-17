@@ -189,6 +189,7 @@ public sealed record PlayerPaymentConfigResponse(
     MercadoPagoEnvironment Environment,
     string? PublicKey,
     bool CanTokenizeCards,
+    bool CanSaveCards,
     bool CanConnectMercadoPagoAccount);
 
 public sealed record MercadoPagoSettingsResponse(
