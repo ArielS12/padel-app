@@ -741,11 +741,6 @@ export class App implements OnInit, AfterViewInit {
       return;
     }
 
-    if (!this.playerPaymentConfig?.canSaveCards) {
-      this.showError({ message: 'El administrador debe configurar el Access Token de Mercado Pago en Pagos para habilitar tarjetas guardadas.' });
-      return;
-    }
-
     if (!this.playerPaymentConfig?.canTokenizeCards || !this.playerPaymentConfig.publicKey) {
       this.showError({ message: 'El administrador debe configurar la Public Key de Mercado Pago para cargar tarjetas.' });
       return;
@@ -766,11 +761,14 @@ export class App implements OnInit, AfterViewInit {
       });
 
       this.setMessage('Tarjeta tokenizada. Guardando medio de pago...');
+      const paymentMethodId = token.payment_method_id ?? this.playerPaymentMethodForm.paymentMethodId;
       this.api.updatePlayerPaymentMethod({
-        cardToken: token.id,
-        paymentMethodId: token.payment_method_id ?? this.playerPaymentMethodForm.paymentMethodId,
-        cardBrand: this.playerPaymentMethodForm.cardBrand || token.payment_method_id || 'Tarjeta',
-        lastFourDigits: token.last_four_digits ?? ''
+        paymentMethodId,
+        cardBrand: this.playerPaymentMethodForm.cardBrand || paymentMethodId || 'Tarjeta',
+        lastFourDigits: token.last_four_digits ?? '',
+        cardholderName: this.playerPaymentMethodForm.cardholderName,
+        identificationType: this.playerPaymentMethodForm.identificationType,
+        identificationNumber: this.playerPaymentMethodForm.identificationNumber
       }).subscribe({
         next: method => {
           this.isSavingPlayerCard = false;

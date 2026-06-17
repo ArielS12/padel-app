@@ -39,27 +39,6 @@ public static class MercadoPagoPlatformCredentials
         return settings?.Environment ?? MercadoPagoEnvironment.Sandbox;
     }
 
-    public static string? ValidateCardSaveCredentials(MercadoPagoSettings? settings, string accessToken)
-    {
-        var publicKey = settings?.PublicKey;
-        var publicKeyIsTest = IsTestCredential(publicKey);
-        var publicKeyIsLive = IsLiveCredential(publicKey);
-        var accessTokenIsTest = IsTestCredential(accessToken);
-        var accessTokenIsLive = IsLiveCredential(accessToken);
-
-        if (publicKeyIsTest && accessTokenIsLive)
-        {
-            return "La Public Key es de prueba y el Access Token es de produccion. Usa credenciales del mismo ambiente en Pagos.";
-        }
-
-        if (publicKeyIsLive && accessTokenIsTest)
-        {
-            return "La Public Key es de produccion y el Access Token es de prueba. Usa credenciales del mismo ambiente en Pagos.";
-        }
-
-        return null;
-    }
-
     private static string? FirstNotEmpty(params string?[] values)
     {
         return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));

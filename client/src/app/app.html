@@ -455,14 +455,11 @@
 
       <article class="card" *ngIf="playerPaymentConfig?.canTokenizeCards">
         <h2>Tarjeta guardada</h2>
-        <p class="muted">Guarda tu tarjeta una sola vez. Mercado Pago la mostrara en el checkout cuando pagues un turno finalizado.</p>
+        <p class="muted">Guarda tu tarjeta una sola vez en la aplicacion. Al pagar un turno usaremos tu email de Mercado Pago y los datos del titular guardados.</p>
         <div class="notice error" *ngIf="!playerPaymentMethod?.hasMercadoPagoAccountLinked">
           Primero vincula tu cuenta de Mercado Pago.
         </div>
-        <div class="notice error" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked && !playerPaymentConfig?.canSaveCards">
-          El administrador aun no configuro el Access Token de Mercado Pago. Sin eso no se pueden guardar tarjetas (puedes pagar igual en el checkout al finalizar el turno).
-        </div>
-        <form (ngSubmit)="savePlayerCardPaymentMethod()" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked && playerPaymentConfig?.canSaveCards">
+        <form (ngSubmit)="savePlayerCardPaymentMethod()" *ngIf="playerPaymentMethod?.hasMercadoPagoAccountLinked && playerPaymentConfig?.canTokenizeCards">
           <label>Titular de la tarjeta
             <input name="playerCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" autocomplete="cc-name" required>
           </label>
@@ -521,7 +518,7 @@
           <label>Access Token plataforma
             <input name="mpPaymentsAccessToken" type="password" [(ngModel)]="mercadoPagoSettingsForm.accessToken" [placeholder]="mercadoPagoSettings?.hasAccessToken ? 'Token configurado. Completa solo si quieres reemplazarlo.' : 'APP_USR-... o TEST-... de tu aplicacion marketplace'">
           </label>
-          <p class="muted">Obligatorio para guardar tarjetas de jugadores. Usa credenciales TEST para pruebas o APP_USR de produccion; Public Key y Access Token deben ser del mismo tipo.</p>
+          <p class="muted">Opcional para otras integraciones de Mercado Pago. Guardar tarjetas de jugadores solo requiere la Public Key.</p>
           <label>Application ID / Client ID
             <input name="mpPaymentsOAuthClientId" [(ngModel)]="mercadoPagoSettingsForm.oauthClientId" placeholder="Ej: 2578244267954252, no APP_USR...">
           </label>

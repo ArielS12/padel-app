@@ -178,12 +178,12 @@ public sealed record PlayerPaymentMethodResponse(
     DateTime? LinkedAtUtc);
 
 public sealed record UpsertPlayerPaymentMethodRequest(
-    string? MercadoPagoCustomerId,
-    string? MercadoPagoCardId,
-    string? CardToken,
     string PaymentMethodId,
     string? CardBrand,
-    string? LastFourDigits);
+    string? LastFourDigits,
+    string? CardholderName,
+    string? IdentificationType,
+    string? IdentificationNumber);
 
 public sealed record PlayerPaymentConfigResponse(
     MercadoPagoEnvironment Environment,

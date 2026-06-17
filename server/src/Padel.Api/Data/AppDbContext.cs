@@ -108,6 +108,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.Property(x => x.PaymentMethodId).HasMaxLength(80);
             entity.Property(x => x.CardBrand).HasMaxLength(80);
             entity.Property(x => x.LastFourDigits).HasMaxLength(8);
+            entity.Property(x => x.CardholderName).HasMaxLength(120);
+            entity.Property(x => x.IdentificationType).HasMaxLength(20);
+            entity.Property(x => x.IdentificationNumber).HasMaxLength(40);
             entity.HasIndex(x => x.UserId).IsUnique();
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });

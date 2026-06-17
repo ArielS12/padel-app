@@ -200,12 +200,12 @@ export class ApiService {
   }
 
   updatePlayerPaymentMethod(payload: {
-    mercadoPagoCustomerId?: string;
-    mercadoPagoCardId?: string;
-    cardToken?: string;
     paymentMethodId: string;
     cardBrand?: string;
     lastFourDigits?: string;
+    cardholderName?: string;
+    identificationType?: string;
+    identificationNumber?: string;
   }) {
     return this.http.post<PlayerPaymentMethodResponse>(`${this.baseUrl}/player-payments/method`, payload);
   }

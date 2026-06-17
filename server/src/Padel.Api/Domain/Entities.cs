@@ -172,6 +172,9 @@ public sealed class PlayerPaymentMethod
     public string PaymentMethodId { get; set; } = string.Empty;
     public string? CardBrand { get; set; }
     public string? LastFourDigits { get; set; }
+    public string? CardholderName { get; set; }
+    public string? IdentificationType { get; set; }
+    public string? IdentificationNumber { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime LinkedAtUtc { get; set; } = DateTime.UtcNow;
 }

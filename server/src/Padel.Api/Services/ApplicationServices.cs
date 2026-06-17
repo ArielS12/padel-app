@@ -1106,6 +1106,26 @@ public sealed class MercadoPagoService(
             payer["id"] = method.MercadoPagoCustomerId;
         }
 
+        if (!string.IsNullOrWhiteSpace(method?.IdentificationType) &&
+            !string.IsNullOrWhiteSpace(method.IdentificationNumber))
+        {
+            payer["identification"] = new Dictionary<string, object?>
+            {
+                ["type"] = method.IdentificationType,
+                ["number"] = method.IdentificationNumber
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(method?.CardholderName))
+        {
+            var nameParts = method.CardholderName.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            payer["first_name"] = nameParts[0];
+            if (nameParts.Length > 1)
+            {
+                payer["last_name"] = nameParts[1];
+            }
+        }
+
         return payer;
     }
 
