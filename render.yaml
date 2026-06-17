@@ -24,10 +24,7 @@ services:
       - key: Jwt__Key
         generateValue: true
       - key: Cors__AllowedOrigins__0
-        fromService:
-          type: web
-          name: padel-client
-          envVarKey: RENDER_EXTERNAL_URL
+        value: https://padel-client.onrender.com
       - key: Seed__AdminEmail
         sync: false
       - key: Seed__AdminPassword
@@ -41,12 +38,6 @@ services:
     rootDir: client
     buildCommand: npm ci && npm run build
     staticPublishPath: dist/padel-client/browser
-    envVars:
-      - key: API_SERVICE_URL
-        fromService:
-          type: web
-          name: padel-api
-          envVarKey: RENDER_EXTERNAL_URL
     routes:
       - type: rewrite
         source: /*

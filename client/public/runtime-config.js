@@ -1,3 +1,3 @@
 window.padelConfig = {
-  "apiBaseUrl": "https://localhost:7128/api"
+  "apiBaseUrl": "https://padel-api-xopm.onrender.com/api"
 };

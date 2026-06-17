@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, '..', 'public');
+const deployedApiBaseUrl = 'https://padel-api-xopm.onrender.com/api';
+const localApiBaseUrl = 'https://localhost:7128/api';
 
 function normalizeApiBaseUrl(url) {
   const trimmed = url.trim().replace(/\/$/, '');
@@ -11,12 +13,15 @@ function normalizeApiBaseUrl(url) {
 }
 
 function resolveApiBaseUrl() {
-  const configuredUrl = process.env.API_BASE_URL ?? process.env.API_SERVICE_URL;
-  if (configuredUrl) {
-    return normalizeApiBaseUrl(configuredUrl);
+  if (process.env.RENDER) {
+    return deployedApiBaseUrl;
   }
 
-  return 'https://localhost:7128/api';
+  if (process.env.API_BASE_URL) {
+    return normalizeApiBaseUrl(process.env.API_BASE_URL);
+  }
+
+  return localApiBaseUrl;
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
