@@ -136,6 +136,7 @@ public interface INotificationService
     Task NotifyMatchCancelledAsync(PadelMatch match, CancellationToken cancellationToken);
     Task NotifyPlayerLeftAsync(PadelMatch match, string userId, CancellationToken cancellationToken);
     Task NotifyPaymentUpdatedAsync(Payment payment, CancellationToken cancellationToken);
+    Task NotifyPaymentDueAsync(Payment payment, CancellationToken cancellationToken);
 }
 
 public sealed class NotificationService(AppDbContext db, ISkillMatcher matcher) : INotificationService
@@ -241,6 +242,20 @@ public sealed class NotificationService(AppDbContext db, ISkillMatcher matcher) 
             Type = NotificationType.PaymentUpdated,
             Title = "Pago actualizado",
             Message = $"El pago del turno quedó en estado {payment.Status}.",
+            PayloadJson = JsonSerializer.Serialize(new { payment.MatchId, payment.Id })
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task NotifyPaymentDueAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        db.Notifications.Add(new Notification
+        {
+            UserId = payment.UserId,
+            Type = NotificationType.PaymentUpdated,
+            Title = "Turno finalizado - Pago pendiente",
+            Message = $"Tu turno finalizo. Debes pagar ${payment.Amount:0.##} en Mercado Pago.",
             PayloadJson = JsonSerializer.Serialize(new { payment.MatchId, payment.Id })
         });
 
@@ -466,7 +481,7 @@ public sealed class MatchService(
         await db.SaveChangesAsync(cancellationToken);
         try
         {
-            await payments.ReservePlayerPaymentAsync(creator, match.Id, ToPaymentAuthorization(request), cancellationToken);
+            await payments.ReservePlayerPaymentAsync(creator, match.Id, cancellationToken);
         }
         catch
         {
@@ -536,11 +551,11 @@ public sealed class MatchService(
             ?? throw new InvalidOperationException("No estas dentro de este turno.");
 
         var userPayments = match.Payments
-            .Where(payment => payment.UserId == userId && payment.Status is PaymentStatus.Pending or PaymentStatus.Authorized)
+            .Where(payment => payment.UserId == userId && payment.Status is PaymentStatus.Reserved or PaymentStatus.Due or PaymentStatus.Pending)
             .ToList();
         foreach (var payment in userPayments)
         {
-            await payments.CancelAuthorizedPaymentAsync(payment.Id, cancellationToken);
+            await payments.CancelPlayerPaymentAsync(payment.Id, cancellationToken);
         }
 
         match.Players.Remove(player);
@@ -679,7 +694,7 @@ public sealed class MatchService(
         try
         {
             var user = await db.Users.SingleAsync(x => x.Id == userId, cancellationToken);
-            await payments.ReservePlayerPaymentAsync(user, match.Id, null, cancellationToken);
+            await payments.ReservePlayerPaymentAsync(user, match.Id, cancellationToken);
         }
         catch
         {
@@ -712,12 +727,12 @@ public sealed class MatchService(
         }
 
         var activePaymentIds = match.Payments
-            .Where(payment => payment.Status is PaymentStatus.Pending or PaymentStatus.Authorized)
+            .Where(payment => payment.Status is PaymentStatus.Reserved or PaymentStatus.Due or PaymentStatus.Pending)
             .Select(payment => payment.Id)
             .ToList();
         foreach (var paymentId in activePaymentIds)
         {
-            await payments.CancelAuthorizedPaymentAsync(paymentId, cancellationToken);
+            await payments.CancelPlayerPaymentAsync(paymentId, cancellationToken);
         }
 
         match.Status = MatchStatus.Cancelled;
@@ -732,17 +747,6 @@ public sealed class MatchService(
         {
             throw new InvalidOperationException("El turno no esta abierto.");
         }
-    }
-
-    private static PaymentAuthorizationRequest? ToPaymentAuthorization(CreateMatchRequest request)
-    {
-        return string.IsNullOrWhiteSpace(request.CardToken) || string.IsNullOrWhiteSpace(request.PaymentMethodId)
-            ? null
-            : new PaymentAuthorizationRequest(
-                request.CardToken,
-                request.PaymentMethodId,
-                request.CardBrand,
-                request.LastFourDigits);
     }
 
     private async Task EnsureUserHasNoActiveMatchAsync(
@@ -769,18 +773,12 @@ public sealed class MatchService(
 public interface IMercadoPagoService
 {
     Task<PaymentPreferenceResponse> CreatePreferenceAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken);
-    Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, PaymentAuthorizationRequest? authorization, CancellationToken cancellationToken);
+    Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken);
     Task UpdatePaymentAsync(string providerPaymentId, PaymentStatus status, CancellationToken cancellationToken);
     Task SyncPaymentFromProviderAsync(Guid paymentId, string providerPaymentId, CancellationToken cancellationToken);
-    Task CancelAuthorizedPaymentAsync(Guid paymentId, CancellationToken cancellationToken);
-    Task<int> CaptureFinishedMatchPaymentsAsync(DateTime nowUtc, CancellationToken cancellationToken);
+    Task CancelPlayerPaymentAsync(Guid paymentId, CancellationToken cancellationToken);
+    Task<int> CompleteFinishedMatchesAsync(DateTime nowUtc, CancellationToken cancellationToken);
 }
-
-public sealed record PaymentAuthorizationRequest(
-    string CardToken,
-    string PaymentMethodId,
-    string? CardBrand,
-    string? LastFourDigits);
 
 public sealed class MercadoPagoService(
     AppDbContext db,
@@ -788,179 +786,72 @@ public sealed class MercadoPagoService(
     IOptions<MercadoPagoOptions> options,
     INotificationService notifications) : IMercadoPagoService
 {
-    private const string MercadoPagoAccountMethod = "mercadopago_account";
     private const decimal OwnerSharePercent = 0.93m;
     private const decimal AdminFeePercent = 0.03m;
     private const decimal ProcessingReservePercent = 0.04m;
-    private static readonly TimeSpan AuthorizationWindow = TimeSpan.FromDays(7);
 
     public async Task<PaymentPreferenceResponse> CreatePreferenceAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken)
     {
-        var match = await db.Matches
-            .Include(x => x.Court)
-            .ThenInclude(x => x.Club)
-            .ThenInclude(x => x.Owner)
-            .Include(x => x.Players)
-            .Include(x => x.Payments)
-            .SingleOrDefaultAsync(x => x.Id == matchId, cancellationToken)
-            ?? throw new InvalidOperationException("El turno no existe.");
+        var match = await LoadMatchForPaymentAsync(matchId, cancellationToken);
 
         if (!match.Players.Any(player => player.UserId == user.Id))
         {
-            throw new InvalidOperationException("Solo los jugadores del turno pueden autorizar su pago.");
+            throw new InvalidOperationException("Solo los jugadores del turno pueden pagar su parte.");
         }
 
-        if (match.Status is MatchStatus.Cancelled or MatchStatus.Completed)
+        if (match.Status != MatchStatus.Completed)
         {
-            throw new InvalidOperationException("El turno no permite nuevos pagos.");
+            throw new InvalidOperationException("El pago en Mercado Pago esta disponible cuando el turno finaliza.");
         }
 
-        if (match.StartsAtUtc > DateTime.UtcNow.Add(AuthorizationWindow))
+        var payment = match.Payments
+            .Where(current => current.UserId == user.Id)
+            .OrderByDescending(current => current.CreatedAtUtc)
+            .FirstOrDefault(current => current.Status is PaymentStatus.Due or PaymentStatus.Pending)
+            ?? throw new InvalidOperationException("No tienes un pago pendiente para este turno.");
+
+        if (payment.Status is PaymentStatus.Captured or PaymentStatus.Approved)
         {
-            throw new InvalidOperationException("Mercado Pago permite reservar pagos por un tiempo limitado. Autoriza el pago cuando falten menos de 7 dias para el turno.");
+            throw new InvalidOperationException("Este turno ya fue pagado.");
         }
 
-        var existingPayment = match.Payments
-            .Where(payment => payment.UserId == user.Id && payment.Status is PaymentStatus.Pending or PaymentStatus.Authorized)
-            .OrderByDescending(payment => payment.CreatedAtUtc)
-            .FirstOrDefault();
-        if (existingPayment is not null && !string.IsNullOrWhiteSpace(existingPayment.CheckoutUrl))
+        if (!string.IsNullOrWhiteSpace(payment.CheckoutUrl) && payment.Status == PaymentStatus.Pending)
         {
-            return ToPreferenceResponse(existingPayment);
+            return ToPreferenceResponse(payment);
         }
 
-        var fullMatchPrice = match.Court.FullMatchPrice > 0 ? match.Court.FullMatchPrice : match.Court.Club.FullMatchPrice;
-        var playerAmount = RoundMoney(fullMatchPrice / 4m);
-        var payment = new Payment
-        {
-            Id = Guid.NewGuid(),
-            MatchId = match.Id,
-            UserId = user.Id,
-            Amount = playerAmount,
-            OwnerAmount = RoundMoney(playerAmount * OwnerSharePercent),
-            AdminFeeAmount = RoundMoney(playerAmount * AdminFeePercent),
-            ProcessingReserveAmount = RoundMoney(playerAmount * ProcessingReservePercent)
-        };
-
-        var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
-        var ownerAccessToken = match.Court.Club.Owner.MercadoPagoAccessToken;
-        if (string.IsNullOrWhiteSpace(ownerAccessToken))
-        {
-            throw new InvalidOperationException("El dueño del club debe configurar su access token de Mercado Pago para recibir el 93% del pago.");
-        }
-
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerAccessToken);
-        var payload = new Dictionary<string, object?>
-        {
-            ["items"] = new[]
-            {
-                new
-                {
-                    title = $"Turno de padel {match.StartsAtUtc:g}",
-                    quantity = 1,
-                    unit_price = payment.Amount,
-                    currency_id = "ARS"
-                }
-            },
-            ["capture"] = false,
-            ["marketplace_fee"] = payment.AdminFeeAmount,
-            ["back_urls"] = new
-            {
-                success = FirstNotEmpty(settings?.SuccessUrl, options.Value.SuccessUrl),
-                failure = FirstNotEmpty(settings?.FailureUrl, options.Value.FailureUrl),
-                pending = FirstNotEmpty(settings?.PendingUrl, options.Value.PendingUrl)
-            }
-        };
-        var notificationUrl = BuildNotificationUrl(FirstNotEmpty(settings?.NotificationUrl, options.Value.NotificationUrl), payment.Id);
-        if (notificationUrl is not null)
-        {
-            payload["notification_url"] = notificationUrl;
-        }
-
-        var response = await httpClient.PostAsJsonAsync("https://api.mercadopago.com/checkout/preferences", payload, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Mercado Pago rechazo la preferencia ({(int)response.StatusCode}). {responseBody}");
-        }
-
-        using var document = JsonDocument.Parse(responseBody);
-        var preferenceId = document.RootElement.GetProperty("id").GetString() ?? $"local-{Guid.NewGuid():N}";
-        var checkoutUrl = GetCheckoutUrl(document.RootElement, settings?.Environment ?? MercadoPagoEnvironment.Sandbox)
-            ?? throw new InvalidOperationException("Mercado Pago no devolvio una URL de checkout valida.");
-
-        payment.ProviderPreferenceId = preferenceId;
-        payment.CheckoutUrl = checkoutUrl;
-        payment.AuthorizationExpiresAtUtc = payment.CreatedAtUtc.Add(AuthorizationWindow);
-        db.Payments.Add(payment);
-        await db.SaveChangesAsync(cancellationToken);
-
-        return ToPreferenceResponse(payment);
+        payment.ProviderPreferenceId = null;
+        payment.CheckoutUrl = null;
+        return await CreateCheckoutPreferenceAsync(user, match, payment, cancellationToken);
     }
 
-    public async Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, PaymentAuthorizationRequest? authorization, CancellationToken cancellationToken)
+    public async Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken)
     {
-        var match = await db.Matches
-            .Include(x => x.Court)
-            .ThenInclude(x => x.Club)
-            .ThenInclude(x => x.Owner)
-            .Include(x => x.Players)
-            .Include(x => x.Payments)
-            .SingleOrDefaultAsync(x => x.Id == matchId, cancellationToken)
-            ?? throw new InvalidOperationException("El turno no existe.");
+        var match = await LoadMatchForPaymentAsync(matchId, cancellationToken);
 
         if (!match.Players.Any(player => player.UserId == user.Id))
         {
             throw new InvalidOperationException("Solo los jugadores del turno pueden reservar su pago.");
         }
 
-        if (match.StartsAtUtc > DateTime.UtcNow.Add(AuthorizationWindow))
+        if (match.Status is MatchStatus.Cancelled or MatchStatus.Completed)
         {
-            throw new InvalidOperationException("Solo puedes reservar el pago cuando falten menos de 7 dias para el turno.");
+            throw new InvalidOperationException("El turno no permite nuevas reservas de pago.");
+        }
+
+        var ownerAccessToken = match.Court.Club.Owner.MercadoPagoAccessToken;
+        if (string.IsNullOrWhiteSpace(ownerAccessToken))
+        {
+            throw new InvalidOperationException("El dueño del club debe vincular Mercado Pago con OAuth para recibir pagos.");
         }
 
         var existingPayment = match.Payments
-            .Where(payment => payment.UserId == user.Id && payment.Status is PaymentStatus.Pending or PaymentStatus.Authorized)
-            .OrderByDescending(payment => payment.CreatedAtUtc)
+            .Where(current => current.UserId == user.Id && current.Status is PaymentStatus.Reserved or PaymentStatus.Due or PaymentStatus.Pending)
+            .OrderByDescending(current => current.CreatedAtUtc)
             .FirstOrDefault();
         if (existingPayment is not null)
         {
             return ToPreferenceResponse(existingPayment);
-        }
-
-        var method = authorization is null
-            ? await db.PlayerPaymentMethods.SingleOrDefaultAsync(x => x.UserId == user.Id && x.IsActive, cancellationToken)
-            : new PlayerPaymentMethod
-            {
-                UserId = user.Id,
-                CardToken = authorization.CardToken,
-                PaymentMethodId = authorization.PaymentMethodId,
-                CardBrand = authorization.CardBrand,
-                LastFourDigits = authorization.LastFourDigits,
-                IsActive = true
-            };
-        if (method is null)
-        {
-            throw new InvalidOperationException("Configura un medio de pago en la seccion Pagos antes de crear o unirte a un turno.");
-        }
-
-        if (method.PaymentMethodId == MercadoPagoAccountMethod)
-        {
-            throw new InvalidOperationException("Agrega una tarjeta en la seccion Pagos antes de crear o unirte a un turno.");
-        }
-
-        if (string.IsNullOrWhiteSpace(method.CardToken) &&
-            string.IsNullOrWhiteSpace(method.MercadoPagoCardId))
-        {
-            throw new InvalidOperationException("Agrega una tarjeta en la seccion Pagos antes de crear o unirte a un turno.");
-        }
-
-        var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
-        var environment = settings?.Environment ?? MercadoPagoEnvironment.Sandbox;
-        var ownerAccessToken = match.Court.Club.Owner.MercadoPagoAccessToken;
-        if (string.IsNullOrWhiteSpace(ownerAccessToken))
-        {
-            throw new InvalidOperationException("El dueño del club debe vincular Mercado Pago para poder cobrar turnos.");
         }
 
         var fullMatchPrice = match.Court.FullMatchPrice > 0 ? match.Court.FullMatchPrice : match.Court.Club.FullMatchPrice;
@@ -974,91 +865,97 @@ public sealed class MercadoPagoService(
             OwnerAmount = RoundMoney(playerAmount * OwnerSharePercent),
             AdminFeeAmount = RoundMoney(playerAmount * AdminFeePercent),
             ProcessingReserveAmount = RoundMoney(playerAmount * ProcessingReservePercent),
-            AuthorizationExpiresAtUtc = DateTime.UtcNow.Add(AuthorizationWindow)
+            Status = PaymentStatus.Reserved
         };
-
-        var payer = new Dictionary<string, object?>
-        {
-            ["email"] = GetPaymentPayerEmail(user, environment)
-        };
-        if (!string.IsNullOrWhiteSpace(method.MercadoPagoCustomerId))
-        {
-            payer["id"] = method.MercadoPagoCustomerId;
-        }
-
-        var payload = new Dictionary<string, object?>
-        {
-            ["transaction_amount"] = payment.Amount,
-            ["description"] = $"Turno de padel {match.StartsAtUtc:g}",
-            ["installments"] = 1,
-            ["payment_method_id"] = method.PaymentMethodId,
-            ["capture"] = false,
-            ["application_fee"] = payment.AdminFeeAmount,
-            ["processing_mode"] = "aggregator",
-            ["external_reference"] = payment.Id.ToString(),
-            ["payer"] = payer
-        };
-
-        if (!string.IsNullOrWhiteSpace(method.CardToken))
-        {
-            payload["token"] = method.CardToken;
-        }
-        else
-        {
-            payload["card_id"] = method.MercadoPagoCardId;
-        }
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.mercadopago.com/v1/payments")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerAccessToken);
-        request.Headers.Add("X-Idempotency-Key", payment.Id.ToString());
-
-        var response = await httpClient.SendAsync(request, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            if (environment == MercadoPagoEnvironment.Sandbox &&
-                responseBody.Contains("Invalid test user email", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Mercado Pago Sandbox solo acepta emails de compradores de prueba. Configura MercadoPago:SandboxPayerEmail con el email de un test user comprador de Mercado Pago.");
-            }
-
-            if (responseBody.Contains("application_fee", StringComparison.OrdinalIgnoreCase) &&
-                responseBody.Contains("processing_mode gateway", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Mercado Pago esta procesando este cobro en modo gateway y no permite application_fee. La aplicacion de Mercado Pago debe estar configurada como Marketplace/Split Payments y el dueño del club debe vincularse con OAuth desde esa misma aplicacion.");
-            }
-
-            throw new InvalidOperationException($"Mercado Pago rechazo la reserva del pago ({(int)response.StatusCode}). {responseBody}");
-        }
-
-        using var document = JsonDocument.Parse(responseBody);
-        var providerPaymentId = document.RootElement.TryGetProperty("id", out var idElement)
-            ? idElement.ToString()
-            : string.Empty;
-        var providerStatus = document.RootElement.TryGetProperty("status", out var statusElement)
-            ? statusElement.GetString()
-            : null;
-        var mappedStatus = MapProviderStatus(providerStatus);
-        if (mappedStatus is PaymentStatus.Rejected or PaymentStatus.Cancelled)
-        {
-            throw new InvalidOperationException("Mercado Pago rechazo la reserva. Verifica fondos disponibles o cambia tu medio de pago.");
-        }
-
-        payment.ProviderAuthorizedPaymentId = providerPaymentId;
-        payment.ProviderPaymentId = providerPaymentId;
-        payment.Status = mappedStatus == PaymentStatus.Pending ? PaymentStatus.Pending : PaymentStatus.Authorized;
-        if (payment.Status == PaymentStatus.Authorized)
-        {
-            payment.AuthorizedAtUtc = DateTime.UtcNow;
-        }
 
         db.Payments.Add(payment);
         await db.SaveChangesAsync(cancellationToken);
         await notifications.NotifyPaymentUpdatedAsync(payment, cancellationToken);
         return ToPreferenceResponse(payment);
+    }
+
+    private async Task<PaymentPreferenceResponse> CreateCheckoutPreferenceAsync(
+        ApplicationUser user,
+        PadelMatch match,
+        Payment payment,
+        CancellationToken cancellationToken)
+    {
+        var settings = await db.MercadoPagoSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        var environment = settings?.Environment ?? MercadoPagoEnvironment.Sandbox;
+        var ownerAccessToken = match.Court.Club.Owner.MercadoPagoAccessToken;
+        if (string.IsNullOrWhiteSpace(ownerAccessToken))
+        {
+            throw new InvalidOperationException("El dueño del club debe vincular Mercado Pago con OAuth para recibir pagos.");
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["items"] = new[]
+            {
+                new
+                {
+                    title = $"Pago turno finalizado {match.StartsAtUtc:g}",
+                    quantity = 1,
+                    unit_price = payment.Amount,
+                    currency_id = "ARS"
+                }
+            },
+            ["marketplace_fee"] = payment.AdminFeeAmount,
+            ["external_reference"] = payment.Id.ToString(),
+            ["payer"] = new Dictionary<string, object?>
+            {
+                ["email"] = GetPaymentPayerEmail(user, environment)
+            },
+            ["back_urls"] = new
+            {
+                success = FirstNotEmpty(settings?.SuccessUrl, options.Value.SuccessUrl),
+                failure = FirstNotEmpty(settings?.FailureUrl, options.Value.FailureUrl),
+                pending = FirstNotEmpty(settings?.PendingUrl, options.Value.PendingUrl)
+            }
+        };
+        var notificationUrl = BuildNotificationUrl(FirstNotEmpty(settings?.NotificationUrl, options.Value.NotificationUrl), payment.Id);
+        if (notificationUrl is not null)
+        {
+            payload["notification_url"] = notificationUrl;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.mercadopago.com/checkout/preferences")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerAccessToken);
+
+        var response = await httpClient.SendAsync(request, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Mercado Pago rechazo la preferencia ({(int)response.StatusCode}). {responseBody}");
+        }
+
+        using var document = JsonDocument.Parse(responseBody);
+        var preferenceId = document.RootElement.GetProperty("id").GetString() ?? $"local-{Guid.NewGuid():N}";
+        var checkoutUrl = GetCheckoutUrl(document.RootElement, environment)
+            ?? throw new InvalidOperationException("Mercado Pago no devolvio una URL de checkout valida.");
+
+        payment.ProviderPreferenceId = preferenceId;
+        payment.CheckoutUrl = checkoutUrl;
+        payment.Status = PaymentStatus.Pending;
+
+        await db.SaveChangesAsync(cancellationToken);
+        await notifications.NotifyPaymentUpdatedAsync(payment, cancellationToken);
+        return ToPreferenceResponse(payment);
+    }
+
+    private async Task<PadelMatch> LoadMatchForPaymentAsync(Guid matchId, CancellationToken cancellationToken)
+    {
+        return await db.Matches
+            .Include(x => x.Court)
+            .ThenInclude(x => x.Club)
+            .ThenInclude(x => x.Owner)
+            .Include(x => x.Players)
+            .Include(x => x.Payments)
+            .SingleOrDefaultAsync(x => x.Id == matchId, cancellationToken)
+            ?? throw new InvalidOperationException("El turno no existe.");
     }
 
     public async Task UpdatePaymentAsync(string providerPaymentId, PaymentStatus status, CancellationToken cancellationToken)
@@ -1128,7 +1025,7 @@ public sealed class MercadoPagoService(
         await notifications.NotifyPaymentUpdatedAsync(payment, cancellationToken);
     }
 
-    public async Task CancelAuthorizedPaymentAsync(Guid paymentId, CancellationToken cancellationToken)
+    public async Task CancelPlayerPaymentAsync(Guid paymentId, CancellationToken cancellationToken)
     {
         var payment = await db.Payments
             .Include(x => x.Match)
@@ -1140,35 +1037,16 @@ public sealed class MercadoPagoService(
 
         if (payment.Status is PaymentStatus.Captured or PaymentStatus.Approved)
         {
-            throw new InvalidOperationException("No se puede salir del turno porque el pago ya fue capturado.");
-        }
-
-        if (payment.Status == PaymentStatus.Authorized && !string.IsNullOrWhiteSpace(payment.ProviderAuthorizedPaymentId))
-        {
-            var accessToken = payment.Match.Court.Club.Owner.MercadoPagoAccessToken;
-            if (string.IsNullOrWhiteSpace(accessToken))
-            {
-                throw new InvalidOperationException("El dueño del club no tiene Mercado Pago configurado.");
-            }
-
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            var response = await httpClient.PutAsJsonAsync(
-                $"https://api.mercadopago.com/v1/payments/{payment.ProviderAuthorizedPaymentId}",
-                new { status = "cancelled" },
-                cancellationToken);
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new InvalidOperationException($"Mercado Pago rechazo la cancelacion de la autorizacion ({(int)response.StatusCode}). {responseBody}");
-            }
+            throw new InvalidOperationException("No se puede cancelar un pago que ya fue cobrado.");
         }
 
         payment.Status = PaymentStatus.Cancelled;
+        payment.CheckoutUrl = null;
         await db.SaveChangesAsync(cancellationToken);
         await notifications.NotifyPaymentUpdatedAsync(payment, cancellationToken);
     }
 
-    public async Task<int> CaptureFinishedMatchPaymentsAsync(DateTime nowUtc, CancellationToken cancellationToken)
+    public async Task<int> CompleteFinishedMatchesAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
         var matches = await db.Matches
             .Include(match => match.Court)
@@ -1178,43 +1056,24 @@ public sealed class MercadoPagoService(
             .Where(match => match.Status == MatchStatus.Full && match.EndsAtUtc <= nowUtc)
             .ToListAsync(cancellationToken);
 
-        var captured = 0;
+        var completed = 0;
         foreach (var match in matches)
         {
-            var authorizations = match.Payments
-                .Where(payment => payment.Status == PaymentStatus.Authorized && !string.IsNullOrWhiteSpace(payment.ProviderAuthorizedPaymentId))
+            var reservedPayments = match.Payments
+                .Where(payment => payment.Status == PaymentStatus.Reserved)
                 .ToList();
-            foreach (var payment in authorizations)
+            foreach (var payment in reservedPayments)
             {
-                var accessToken = match.Court.Club.Owner.MercadoPagoAccessToken;
-                if (string.IsNullOrWhiteSpace(accessToken))
-                {
-                    throw new InvalidOperationException("El dueño del club no tiene Mercado Pago configurado.");
-                }
-
-                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-                var response = await httpClient.PutAsJsonAsync(
-                    $"https://api.mercadopago.com/v1/payments/{payment.ProviderAuthorizedPaymentId}",
-                    new { capture = true },
-                    cancellationToken);
-                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw new InvalidOperationException($"Mercado Pago rechazo la captura ({(int)response.StatusCode}). {responseBody}");
-                }
-
-                payment.Status = PaymentStatus.Captured;
-                payment.ProviderPaymentId = payment.ProviderAuthorizedPaymentId;
-                payment.CapturedAtUtc = DateTime.UtcNow;
-                captured++;
-                await notifications.NotifyPaymentUpdatedAsync(payment, cancellationToken);
+                payment.Status = PaymentStatus.Due;
+                await notifications.NotifyPaymentDueAsync(payment, cancellationToken);
             }
 
             match.Status = MatchStatus.Completed;
+            completed++;
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        return captured;
+        return completed;
     }
 
     private string? GetPaymentPayerEmail(ApplicationUser user, MercadoPagoEnvironment environment)
@@ -1307,10 +1166,10 @@ public sealed class MatchCancellationWorker(IServiceProvider serviceProvider, IL
                     logger.LogInformation("Cancelled {Count} incomplete matches.", cancelled);
                 }
 
-                var captured = await payments.CaptureFinishedMatchPaymentsAsync(DateTime.UtcNow, stoppingToken);
-                if (captured > 0)
+                var completed = await payments.CompleteFinishedMatchesAsync(DateTime.UtcNow, stoppingToken);
+                if (completed > 0)
                 {
-                    logger.LogInformation("Captured {Count} finished match payments.", captured);
+                    logger.LogInformation("Completed {Count} finished matches.", completed);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

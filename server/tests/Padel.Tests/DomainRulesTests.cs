@@ -69,8 +69,7 @@ public sealed class DomainRulesTests
             OwnerAmount = 2325m,
             AdminFeeAmount = 75m,
             ProcessingReserveAmount = 100m,
-            Status = PaymentStatus.Authorized,
-            ProviderAuthorizedPaymentId = "authorized-payment"
+            Status = PaymentStatus.Reserved
         });
         await db.SaveChangesAsync();
 
@@ -128,7 +127,7 @@ public sealed class DomainRulesTests
     }
 
     [Fact]
-    public async Task MatchService_AllowsPlayerToLeaveAndCancelsAuthorizedPayment()
+    public async Task MatchService_AllowsPlayerToLeaveAndCancelsReservedPayment()
     {
         await using var db = CreateDbContext();
         var court = await SeedApprovedClubAsync(db);
@@ -154,8 +153,7 @@ public sealed class DomainRulesTests
             OwnerAmount = 2325m,
             AdminFeeAmount = 75m,
             ProcessingReserveAmount = 100m,
-            Status = PaymentStatus.Authorized,
-            ProviderAuthorizedPaymentId = "authorized-payment"
+            Status = PaymentStatus.Reserved
         });
         await db.SaveChangesAsync();
 
@@ -208,7 +206,7 @@ public sealed class DomainRulesTests
     }
 
     [Fact]
-    public async Task MercadoPagoService_SplitsPlayerPaymentBetweenOwnerAndAdmin()
+    public async Task MercadoPagoService_CreatesCheckoutPreferenceWhenMatchIsCompleted()
     {
         await using var db = CreateDbContext();
         var court = await SeedApprovedClubAsync(db);
@@ -226,8 +224,19 @@ public sealed class DomainRulesTests
         db.CourtBookings.Add(booking);
         await db.SaveChangesAsync();
 
+        var payment = new Payment
+        {
+            MatchId = Guid.NewGuid(),
+            UserId = player.Id,
+            Amount = 2500m,
+            OwnerAmount = 2325m,
+            AdminFeeAmount = 75m,
+            ProcessingReserveAmount = 100m,
+            Status = PaymentStatus.Due
+        };
         var match = new PadelMatch
         {
+            Id = payment.MatchId,
             CreatorId = player.Id,
             CourtId = court.Id,
             CourtBookingId = booking.Id,
@@ -235,10 +244,12 @@ public sealed class DomainRulesTests
             EndsAtUtc = booking.EndsAtUtc,
             RequiredCategory = SkillCategory.Sexta,
             RequiredLevel = SkillLevel.Bajo,
+            Status = MatchStatus.Completed,
             Players =
             {
                 new MatchPlayer { UserId = player.Id, TeamNumber = 1 }
-            }
+            },
+            Payments = { payment }
         };
         db.Matches.Add(match);
         await db.SaveChangesAsync();
@@ -251,16 +262,13 @@ public sealed class DomainRulesTests
             new FakeNotifications());
 
         var preference = await service.CreatePreferenceAsync(player, match.Id, CancellationToken.None);
-        var payment = await db.Payments.SingleAsync();
 
         Assert.Equal(2500m, preference.Amount);
-        Assert.Equal(2325m, preference.OwnerAmount);
-        Assert.Equal(75m, preference.AdminFeeAmount);
-        Assert.Equal(100m, preference.ProcessingReserveAmount);
-        Assert.Equal(preference.OwnerAmount, payment.OwnerAmount);
-        Assert.Equal(preference.AdminFeeAmount, payment.AdminFeeAmount);
-        Assert.Contains("\"capture\":false", httpHandler.LastRequestBody);
+        Assert.Equal(PaymentStatus.Pending, preference.Status);
         Assert.Contains("\"marketplace_fee\":75", httpHandler.LastRequestBody);
+        Assert.Contains("\"email\":\"buyer@testuser.com\"", httpHandler.LastRequestBody);
+        Assert.Contains($"\"external_reference\":\"{payment.Id}\"", httpHandler.LastRequestBody);
+        Assert.EndsWith("/checkout/preferences", httpHandler.LastRequestPath);
 
         await service.SyncPaymentFromProviderAsync(payment.Id, "payment-test", CancellationToken.None);
         Assert.Equal(PaymentStatus.Captured, payment.Status);
@@ -268,13 +276,13 @@ public sealed class DomainRulesTests
     }
 
     [Fact]
-    public async Task MercadoPagoService_ReservesPlayerPaymentWithSavedMethod()
+    public async Task MercadoPagoService_ReservesPlayerPaymentWithoutCallingMercadoPago()
     {
         await using var db = CreateDbContext();
         var court = await SeedApprovedClubAsync(db);
         var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
         owner.MercadoPagoAccessToken = "owner-token";
-        var player = CreateUser("auto-payer@test.local");
+        var player = CreateUser("reserved-payer@test.local");
         var startsAt = NextWeekdayUtc(DayOfWeek.Monday, 10);
         var booking = new CourtBooking
         {
@@ -285,7 +293,6 @@ public sealed class DomainRulesTests
         db.Users.Add(player);
         db.CourtBookings.Add(booking);
         await db.SaveChangesAsync();
-        AddPlayerPaymentMethod(db, player);
 
         var match = new PadelMatch
         {
@@ -311,80 +318,22 @@ public sealed class DomainRulesTests
             Options.Create(new MercadoPagoOptions { SandboxPayerEmail = "buyer@testuser.com" }),
             new FakeNotifications());
 
-        var reservation = await service.ReservePlayerPaymentAsync(player, match.Id, null, CancellationToken.None);
+        var reservation = await service.ReservePlayerPaymentAsync(player, match.Id, CancellationToken.None);
         var payment = await db.Payments.SingleAsync();
 
-        Assert.Equal(PaymentStatus.Authorized, reservation.Status);
-        Assert.Equal(PaymentStatus.Authorized, payment.Status);
-        Assert.Contains("\"capture\":false", httpHandler.LastRequestBody);
-        Assert.Contains("\"token\":\"card-token\"", httpHandler.LastRequestBody);
-        Assert.Contains("\"application_fee\":75", httpHandler.LastRequestBody);
-        Assert.Contains("\"processing_mode\":\"aggregator\"", httpHandler.LastRequestBody);
-        Assert.Contains("\"email\":\"buyer@testuser.com\"", httpHandler.LastRequestBody);
-        Assert.DoesNotContain("\"id\":\"customer-", httpHandler.LastRequestBody);
-        Assert.Equal(payment.Id.ToString(), httpHandler.LastIdempotencyKey);
-    }
-
-    [Fact]
-    public async Task MercadoPagoService_RejectsLinkedAccountForAutomaticReservation()
-    {
-        await using var db = CreateDbContext();
-        var court = await SeedApprovedClubAsync(db);
-        var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
-        owner.MercadoPagoAccessToken = "owner-token";
-        var player = CreateUser("linked-account@test.local");
-        var startsAt = NextWeekdayUtc(DayOfWeek.Monday, 10);
-        var booking = new CourtBooking
-        {
-            CourtId = court.Id,
-            StartsAtUtc = startsAt,
-            EndsAtUtc = startsAt.AddMinutes(90)
-        };
-        db.Users.Add(player);
-        db.CourtBookings.Add(booking);
-        await db.SaveChangesAsync();
-        AddLinkedMercadoPagoAccount(db, player);
-
-        var match = new PadelMatch
-        {
-            CreatorId = player.Id,
-            CourtId = court.Id,
-            CourtBookingId = booking.Id,
-            StartsAtUtc = booking.StartsAtUtc,
-            EndsAtUtc = booking.EndsAtUtc,
-            RequiredCategory = SkillCategory.Sexta,
-            RequiredLevel = SkillLevel.Bajo,
-            Players =
-            {
-                new MatchPlayer { UserId = player.Id, TeamNumber = 1 }
-            }
-        };
-        db.Matches.Add(match);
-        await db.SaveChangesAsync();
-
-        var httpHandler = new FakeMercadoPagoHandler();
-        var service = new MercadoPagoService(
-            db,
-            new HttpClient(httpHandler),
-            Options.Create(new MercadoPagoOptions()),
-            new FakeNotifications());
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ReservePlayerPaymentAsync(player, match.Id, null, CancellationToken.None));
-
-        Assert.Contains("Agrega una tarjeta", ex.Message);
-        Assert.Empty(db.Payments);
+        Assert.Equal(PaymentStatus.Reserved, reservation.Status);
+        Assert.Equal(PaymentStatus.Reserved, payment.Status);
+        Assert.Equal(2500m, payment.Amount);
+        Assert.Null(payment.CheckoutUrl);
         Assert.Empty(httpHandler.LastRequestBody);
     }
 
     [Fact]
-    public async Task MatchService_BlocksCreateWhenPlayerHasNoPaymentMethod()
+    public async Task MatchService_BlocksCreateWhenClubOwnerHasNoMercadoPago()
     {
         await using var db = CreateDbContext();
         var court = await SeedApprovedClubAsync(db);
-        var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
-        owner.MercadoPagoAccessToken = "owner-token";
-        var player = CreateUser("without-method@test.local");
+        var player = CreateUser("without-owner-mp@test.local");
         db.Users.Add(player);
         await db.SaveChangesAsync();
 
@@ -398,69 +347,13 @@ public sealed class DomainRulesTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CreateAsync(player, new CreateMatchRequest(court.Id, NextWeekdayUtc(DayOfWeek.Monday, 10), 90), CancellationToken.None));
 
-        Assert.Contains("Configura un medio de pago", ex.Message);
+        Assert.Contains("vincular Mercado Pago", ex.Message);
         Assert.Empty(db.Matches);
         Assert.All(db.CourtBookings, booking => Assert.True(booking.IsCancelled));
     }
 
     [Fact]
-    public async Task MatchService_BlocksJoinWhenPlayerHasNoPaymentMethod()
-    {
-        await using var db = CreateDbContext();
-        var court = await SeedApprovedClubAsync(db);
-        var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
-        owner.MercadoPagoAccessToken = "owner-token";
-        var creator = CreateUser("creator-pay@test.local");
-        var joiner = CreateUser("joiner-no-method@test.local");
-        db.Users.AddRange(creator, joiner);
-        await db.SaveChangesAsync();
-        AddPlayerPaymentMethod(db, creator);
-
-        var paymentService = new MercadoPagoService(
-            db,
-            new HttpClient(new FakeMercadoPagoHandler()),
-            Options.Create(new MercadoPagoOptions()),
-            new FakeNotifications());
-        var service = new MatchService(db, new SkillMatcher(), new AvailabilityService(db), new FakeNotifications(), paymentService);
-        var match = await service.CreateAsync(creator, new CreateMatchRequest(court.Id, NextWeekdayUtc(DayOfWeek.Monday, 10), 90), CancellationToken.None);
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.JoinAsync(match.Id, joiner, CancellationToken.None));
-
-        Assert.Contains("Configura un medio de pago", ex.Message);
-        Assert.DoesNotContain(match.Players, player => player.UserId == joiner.Id);
-    }
-
-    [Fact]
-    public async Task MatchService_RollsBackCreateWhenReservationIsRejected()
-    {
-        await using var db = CreateDbContext();
-        var court = await SeedApprovedClubAsync(db);
-        var owner = await db.Users.SingleAsync(user => user.Email == "owner@test.local");
-        owner.MercadoPagoAccessToken = "owner-token";
-        var player = CreateUser("rejected-payment@test.local");
-        db.Users.Add(player);
-        await db.SaveChangesAsync();
-        AddPlayerPaymentMethod(db, player);
-
-        var paymentService = new MercadoPagoService(
-            db,
-            new HttpClient(new FakeMercadoPagoHandler("rejected")),
-            Options.Create(new MercadoPagoOptions()),
-            new FakeNotifications());
-        var service = new MatchService(db, new SkillMatcher(), new AvailabilityService(db), new FakeNotifications(), paymentService);
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.CreateAsync(player, new CreateMatchRequest(court.Id, NextWeekdayUtc(DayOfWeek.Monday, 10), 90), CancellationToken.None));
-
-        Assert.Contains("Mercado Pago rechazo la reserva", ex.Message);
-        Assert.Empty(db.Matches);
-        Assert.Empty(db.Payments);
-        Assert.All(db.CourtBookings, booking => Assert.True(booking.IsCancelled));
-    }
-
-    [Fact]
-    public async Task MercadoPagoService_CapturesAuthorizedPaymentsWhenMatchEnds()
+    public async Task MercadoPagoService_CompleteFinishedMatchesMarksPaymentsDue()
     {
         await using var db = CreateDbContext();
         var court = await SeedApprovedClubAsync(db);
@@ -497,28 +390,27 @@ public sealed class DomainRulesTests
                     OwnerAmount = 2325m,
                     AdminFeeAmount = 75m,
                     ProcessingReserveAmount = 100m,
-                    Status = PaymentStatus.Authorized,
-                    ProviderAuthorizedPaymentId = "authorized-payment"
+                    Status = PaymentStatus.Reserved
                 }
             }
         };
         db.Matches.Add(match);
         await db.SaveChangesAsync();
 
-        var httpHandler = new FakeMercadoPagoHandler();
+        var notifications = new FakeNotifications();
         var service = new MercadoPagoService(
             db,
-            new HttpClient(httpHandler),
+            new HttpClient(new FakeMercadoPagoHandler()),
             Options.Create(new MercadoPagoOptions()),
-            new FakeNotifications());
+            notifications);
 
-        var captured = await service.CaptureFinishedMatchPaymentsAsync(DateTime.UtcNow, CancellationToken.None);
+        var completed = await service.CompleteFinishedMatchesAsync(DateTime.UtcNow, CancellationToken.None);
         var payment = await db.Payments.SingleAsync();
 
-        Assert.Equal(1, captured);
-        Assert.Equal(PaymentStatus.Captured, payment.Status);
+        Assert.Equal(1, completed);
+        Assert.Equal(PaymentStatus.Due, payment.Status);
         Assert.Equal(MatchStatus.Completed, match.Status);
-        Assert.Contains("\"capture\":true", httpHandler.LastRequestBody);
+        Assert.Single(notifications.DuePayments);
     }
 
     private static AppDbContext CreateDbContext()
@@ -570,6 +462,7 @@ public sealed class DomainRulesTests
             }
         };
 
+        AddDailySchedules(club);
         db.Users.Add(owner);
         db.Clubs.Add(club);
         await db.SaveChangesAsync();
@@ -591,9 +484,34 @@ public sealed class DomainRulesTests
                 new CourtSchedule { DayOfWeek = DayOfWeek.Monday, OpensAt = new TimeOnly(8, 0), ClosesAt = new TimeOnly(22, 0), SlotMinutes = 90 }
             }
         };
+        AddDailySchedules(court);
         db.Courts.Add(court);
         await db.SaveChangesAsync();
         return court;
+    }
+
+    private static void AddDailySchedules(Club club)
+    {
+        foreach (var dayOfWeek in Enum.GetValues<DayOfWeek>())
+        {
+            if (!club.Schedules.Any(schedule => schedule.DayOfWeek == dayOfWeek))
+            {
+                club.Schedules.Add(new ClubSchedule { DayOfWeek = dayOfWeek, OpensAt = new TimeOnly(8, 0), ClosesAt = new TimeOnly(22, 0), SlotMinutes = 90 });
+            }
+
+            foreach (var court in club.Courts.Where(court => !court.Schedules.Any(schedule => schedule.DayOfWeek == dayOfWeek)))
+            {
+                court.Schedules.Add(new CourtSchedule { DayOfWeek = dayOfWeek, OpensAt = new TimeOnly(8, 0), ClosesAt = new TimeOnly(22, 0), SlotMinutes = 90 });
+            }
+        }
+    }
+
+    private static void AddDailySchedules(Court court)
+    {
+        foreach (var dayOfWeek in Enum.GetValues<DayOfWeek>().Where(dayOfWeek => !court.Schedules.Any(schedule => schedule.DayOfWeek == dayOfWeek)))
+        {
+            court.Schedules.Add(new CourtSchedule { DayOfWeek = dayOfWeek, OpensAt = new TimeOnly(8, 0), ClosesAt = new TimeOnly(22, 0), SlotMinutes = 90 });
+        }
     }
 
     private static ApplicationUser CreateUser(string email)
@@ -638,19 +556,15 @@ public sealed class DomainRulesTests
     private static DateTime NextWeekdayUtc(DayOfWeek dayOfWeek, int hour)
     {
         var now = DateTime.UtcNow;
-        var date = DateOnly.FromDateTime(now.Date);
-        while (date.DayOfWeek != dayOfWeek)
-        {
-            date = date.AddDays(1);
-        }
-
+        var date = DateOnly.FromDateTime(now.Date).AddDays(1);
         var startsAt = date.ToDateTime(new TimeOnly(hour, 0), DateTimeKind.Utc);
-        return startsAt > now ? startsAt : startsAt.AddDays(7);
+        return startsAt > now ? startsAt : startsAt.AddDays(1);
     }
 
     private sealed class FakeNotifications : INotificationService
     {
         public List<Guid> CancelledMatches { get; } = [];
+        public List<Guid> DuePayments { get; } = [];
 
         public Task NotifyEligibleMatchCreatedAsync(PadelMatch match, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -667,6 +581,12 @@ public sealed class DomainRulesTests
         public Task NotifyPlayerLeftAsync(PadelMatch match, string userId, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task NotifyPaymentUpdatedAsync(Payment payment, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task NotifyPaymentDueAsync(Payment payment, CancellationToken cancellationToken)
+        {
+            DuePayments.Add(payment.Id);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeMercadoPagoService(AppDbContext db) : IMercadoPagoService
@@ -676,13 +596,13 @@ public sealed class DomainRulesTests
             throw new NotSupportedException();
         }
 
-        public Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, PaymentAuthorizationRequest? authorization, CancellationToken cancellationToken)
+        public Task<PaymentPreferenceResponse> ReservePlayerPaymentAsync(ApplicationUser user, Guid matchId, CancellationToken cancellationToken)
         {
             return Task.FromResult(new PaymentPreferenceResponse(
                 Guid.NewGuid(),
                 $"fake-{Guid.NewGuid():N}",
                 string.Empty,
-                PaymentStatus.Authorized,
+                PaymentStatus.Reserved,
                 0m,
                 0m,
                 0m,
@@ -699,26 +619,28 @@ public sealed class DomainRulesTests
             throw new NotSupportedException();
         }
 
-        public async Task CancelAuthorizedPaymentAsync(Guid paymentId, CancellationToken cancellationToken)
+        public async Task CancelPlayerPaymentAsync(Guid paymentId, CancellationToken cancellationToken)
         {
             var payment = await db.Payments.SingleAsync(payment => payment.Id == paymentId, cancellationToken);
             payment.Status = PaymentStatus.Cancelled;
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        public Task<int> CaptureFinishedMatchPaymentsAsync(DateTime nowUtc, CancellationToken cancellationToken)
+        public Task<int> CompleteFinishedMatchesAsync(DateTime nowUtc, CancellationToken cancellationToken)
         {
             throw new NotSupportedException();
         }
     }
 
-    private sealed class FakeMercadoPagoHandler(string reserveStatus = "authorized") : HttpMessageHandler
+    private sealed class FakeMercadoPagoHandler : HttpMessageHandler
     {
         public string LastRequestBody { get; private set; } = string.Empty;
         public string LastIdempotencyKey { get; private set; } = string.Empty;
+        public string LastRequestPath { get; private set; } = string.Empty;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            LastRequestPath = request.RequestUri?.AbsolutePath ?? string.Empty;
             LastRequestBody = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -737,22 +659,6 @@ public sealed class DomainRulesTests
                           "status": "approved"
                         }
                         """,
-                        System.Text.Encoding.UTF8,
-                        "application/json")
-                };
-            }
-
-            if (request.RequestUri?.AbsolutePath.EndsWith("/v1/payments", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        """
-                        {
-                          "id": 456,
-                          "status": "%RESERVE_STATUS%"
-                        }
-                        """.Replace("%RESERVE_STATUS%", reserveStatus, StringComparison.Ordinal),
                         System.Text.Encoding.UTF8,
                         "application/json")
                 };

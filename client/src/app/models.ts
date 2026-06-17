@@ -3,7 +3,7 @@ export type SkillLevel = 'Bajo' | 'Medio' | 'Alto';
 export type ClubStatus = 'PendingApproval' | 'Approved' | 'Rejected';
 export type MatchStatus = 'Open' | 'Full' | 'Cancelled' | 'Completed';
 export type JoinRequestStatus = 'Pending' | 'Accepted' | 'Rejected' | 'Cancelled';
-export type PaymentStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'Authorized' | 'Captured' | 'Cancelled';
+export type PaymentStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'Authorized' | 'Captured' | 'Cancelled' | 'Reserved' | 'Due';
 export type MercadoPagoEnvironment = 'Sandbox' | 'Production';
 
 export interface UserSummary {

@@ -173,8 +173,7 @@ public sealed class AccountController(
             client_secret = settings.OAuthClientSecret,
             grant_type = "authorization_code",
             code,
-            redirect_uri = settings.OAuthRedirectUrl,
-            test_token = settings.Environment == MercadoPagoEnvironment.Sandbox ? "true" : "false"
+            redirect_uri = settings.OAuthRedirectUrl
         }, cancellationToken);
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);

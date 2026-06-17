@@ -50,7 +50,9 @@ public enum PaymentStatus
     Refunded = 4,
     Authorized = 5,
     Captured = 6,
-    Cancelled = 7
+    Cancelled = 7,
+    Reserved = 8,
+    Due = 9
 }
 
 public enum MercadoPagoEnvironment

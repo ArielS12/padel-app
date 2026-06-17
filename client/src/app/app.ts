@@ -235,7 +235,8 @@ export class App implements OnInit, AfterViewInit {
   }
 
   get createPaymentPublicKey() {
-    return this.playerPaymentConfig?.publicKey;
+    const club = this.clubs.find(currentClub => currentClub.id === this.createTurnForm.clubId);
+    return club?.mercadoPagoPublicKey ?? this.playerPaymentConfig?.publicKey;
   }
 
   get availableSlotsForSelectedCourt() {
@@ -902,25 +903,19 @@ export class App implements OnInit, AfterViewInit {
 
     const durationMinutes = Math.round((new Date(selectedSlot.endsAtUtc).getTime() - new Date(selectedSlot.startsAtUtc).getTime()) / 60000);
     this.isSavingPlayerCard = true;
-    this.setMessage('Tokenizando tarjeta para autorizar la reserva...');
-    try {
-      const payment = await this.createSingleUseCardToken();
-      this.api.createMatch(selectedSlot.courtId, selectedSlot.startsAtUtc, durationMinutes, payment).subscribe({
-        next: () => {
-          this.isSavingPlayerCard = false;
-          this.setMessage('Turno creado y pago autorizado correctamente.');
-          this.activeSection = 'mine';
-          this.refreshPrivateData();
-        },
-        error: error => {
-          this.isSavingPlayerCard = false;
-          this.showError(error);
-        }
-      });
-    } catch (error) {
-      this.isSavingPlayerCard = false;
-      this.showError(error);
-    }
+    this.setMessage('Creando turno y bloqueando tu importe...');
+    this.api.createMatch(selectedSlot.courtId, selectedSlot.startsAtUtc, durationMinutes).subscribe({
+      next: () => {
+        this.isSavingPlayerCard = false;
+        this.setMessage('Turno creado. Tu importe quedo bloqueado hasta que finalice el partido.');
+        this.activeSection = 'mine';
+        this.refreshPrivateData();
+      },
+      error: error => {
+        this.isSavingPlayerCard = false;
+        this.showError(error);
+      }
+    });
   }
 
   searchMatches(all = this.showAllMatches) {
@@ -946,22 +941,28 @@ export class App implements OnInit, AfterViewInit {
   }
 
   joinMatch(match: MatchResponse) {
-    if (!this.ensurePlayerPaymentMethodConfigured()) {
-      return;
-    }
-
     this.api.joinMatch(match.id).subscribe({
-      next: updatedMatch => {
-        if (updatedMatch.currentUserPaymentCheckoutUrl) {
-          this.setMessage('Te uniste al turno. Redirigiendo a Mercado Pago para autorizar la reserva.');
-          window.location.assign(updatedMatch.currentUserPaymentCheckoutUrl);
-          return;
-        }
-
-        this.setMessage('Te uniste al turno y tu pago quedo reservado.');
+      next: () => {
+        this.setMessage('Te uniste al turno. Tu importe quedo bloqueado hasta que finalice el partido.');
         this.searchMatches(this.showAllMatches);
         this.loadMyMatches();
         this.loadNotifications();
+      },
+      error: error => this.showError(error)
+    });
+  }
+
+  payMatch(match: MatchResponse) {
+    this.api.createPaymentPreference(match.id).subscribe({
+      next: payment => {
+        this.lastPayment = payment;
+        if (payment.checkoutUrl) {
+          this.setMessage('Redirigiendo a Mercado Pago para completar el pago.');
+          window.location.assign(payment.checkoutUrl);
+          return;
+        }
+
+        this.setMessage('No se pudo abrir el checkout de Mercado Pago.');
       },
       error: error => this.showError(error)
     });
@@ -1341,16 +1342,22 @@ export class App implements OnInit, AfterViewInit {
     return value.replace(/\D/g, '');
   }
 
-  private ensurePlayerPaymentMethodConfigured() {
-    if (this.playerPaymentMethod?.canReserveAutomatically) {
-      return true;
+  paymentStatusLabel(status?: string) {
+    switch (status) {
+      case 'Reserved':
+        return 'Importe bloqueado';
+      case 'Due':
+        return 'Pago pendiente';
+      case 'Pending':
+        return 'Checkout en curso';
+      case 'Captured':
+      case 'Approved':
+        return 'Pagado';
+      case 'Cancelled':
+        return 'Cancelado';
+      default:
+        return 'Sin estado';
     }
-
-    this.activeSection = 'payments';
-    this.loadPlayerPaymentConfig();
-    this.loadPlayerPaymentMethod();
-    this.showError({ message: 'Agrega una tarjeta en la seccion Pagos para poder autorizar tu lugar.' });
-    return false;
   }
 
   private handleInvalidSession() {

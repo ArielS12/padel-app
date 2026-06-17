@@ -157,40 +157,10 @@
           </div>
 
           <hr>
-          <h3>Autorizar pago</h3>
-          <p class="muted">La tarjeta se tokeniza al crear el turno y se usa una sola vez para autorizar la reserva. El cobro se captura automaticamente al finalizar si el turno se completa.</p>
-          <p class="notice error" *ngIf="!createPaymentPublicKey">
-            El administrador debe configurar la Public Key de la aplicacion marketplace de Mercado Pago.
-          </p>
-          <label>Titular de la tarjeta
-            <input name="createCardholderName" [(ngModel)]="playerPaymentMethodForm.cardholderName" required>
-          </label>
-          <div class="row">
-            <label>Tipo de documento
-              <select name="createIdentificationType" [(ngModel)]="playerPaymentMethodForm.identificationType">
-                <option value="DNI">DNI</option>
-                <option value="CUIL">CUIL</option>
-                <option value="CUIT">CUIT</option>
-              </select>
-            </label>
-            <label>Numero de documento
-              <input name="createIdentificationNumber" [(ngModel)]="playerPaymentMethodForm.identificationNumber" required>
-            </label>
-          </div>
-          <label>Numero de tarjeta
-            <div class="mp-secure-field" id="playerCardNumberField"></div>
-          </label>
-          <div class="row">
-            <label>Vencimiento
-              <div class="mp-secure-field" id="playerCardExpirationField"></div>
-            </label>
-            <label>CVV
-              <div class="mp-secure-field" id="playerCardSecurityCodeField"></div>
-            </label>
-          </div>
-
-          <button type="submit" [disabled]="!selectedCreateSlot || isSavingPlayerCard || !createPaymentPublicKey">
-            {{ isSavingPlayerCard ? 'Autorizando...' : 'Crear turno y autorizar pago' }}
+          <h3>Reserva de importe</h3>
+          <p class="muted">Al crear el turno se bloquea tu parte del importe en la aplicacion. Pagaras con Checkout Pro de Mercado Pago cuando el turno finalice.</p>
+          <button type="submit" [disabled]="!selectedCreateSlot || isSavingPlayerCard">
+            {{ isSavingPlayerCard ? 'Creando turno...' : 'Crear turno' }}
           </button>
         </form>
       </article>
@@ -247,7 +217,7 @@
             <div>
               <strong>{{ match.clubName }} - {{ match.courtName }}</strong>
               <span>{{ match.startsAtUtc | date:'short' }} · {{ match.playerCount }}/4 jugadores</span>
-              <small>Pago: {{ match.currentUserPaymentStatus || 'Pendiente de autorizacion' }}</small>
+              <small>Pago: {{ paymentStatusLabel(match.currentUserPaymentStatus) }}</small>
             </div>
             <span class="status">{{ match.isCreator ? 'Creador' : 'Jugador' }} · {{ match.status }}</span>
           </div>
@@ -255,8 +225,11 @@
             <span *ngFor="let player of match.players">Equipo {{ player.teamNumber }}: {{ player.fullName }}</span>
           </div>
           <div class="actions">
+            <button type="button" *ngIf="match.currentUserPaymentStatus === 'Due'" (click)="payMatch(match)">
+              Pagar en Mercado Pago
+            </button>
             <a *ngIf="match.currentUserPaymentCheckoutUrl && match.currentUserPaymentStatus === 'Pending'" [href]="match.currentUserPaymentCheckoutUrl" target="_blank" rel="noreferrer">
-              Autorizar reserva
+              Continuar pago en Mercado Pago
             </a>
             <button type="button" class="danger" *ngIf="match.isCreator && match.status !== 'Cancelled'" (click)="cancelMatch(match)">Cancelar turno</button>
             <button type="button" class="danger" *ngIf="!match.isCreator && match.status !== 'Cancelled' && match.status !== 'Completed'" (click)="leaveMatch(match)">Salir del turno</button>
@@ -456,29 +429,24 @@
     <section class="panel grid two" *ngIf="activeSection === 'payments' && isPlayer">
       <article class="card">
         <h2>Pagos</h2>
-        <p class="muted">Por seguridad, la tarjeta se tokeniza en el momento de crear o unirte a un turno. No guardamos tokens de tarjeta porque Mercado Pago los permite usar una sola vez.</p>
-        <div class="notice" *ngIf="playerPaymentMethod?.hasPaymentMethod">
-          Tienes un medio anterior guardado{{ playerPaymentMethod?.lastFourDigits ? ' · termina en ' + playerPaymentMethod?.lastFourDigits : '' }}. Puedes eliminarlo; ya no se usara para nuevas reservas.
+        <p class="muted">Al crear o unirte a un turno se bloquea tu parte del importe. Cuando el turno finaliza, pagas manualmente con Checkout Pro de Mercado Pago.</p>
+        <div class="notice" *ngIf="playerPaymentMethod?.hasPaymentMethod && playerPaymentMethod?.linkType === 'Cuenta Mercado Pago'">
+          Cuenta de Mercado Pago vinculada{{ playerPaymentMethod?.mercadoPagoCustomerId ? ' · ID ' + playerPaymentMethod?.mercadoPagoCustomerId : '' }}.
         </div>
-        <div class="notice">
-          Al crear un turno, completa los datos de tarjeta en ese mismo formulario para autorizar la reserva.
-        </div>
-        <p class="muted" *ngIf="!playerPaymentConfig?.canTokenizeCards">
-          El administrador debe configurar la Public Key de Mercado Pago para habilitar tarjetas.
-        </p>
-
         <div class="actions">
+          <button type="button" (click)="connectPlayerMercadoPagoAccount()">Vincular cuenta de Mercado Pago</button>
           <button type="button" class="secondary" (click)="loadPlayerPaymentConfig(); loadPlayerPaymentMethod()">Actualizar estado</button>
           <button type="button" class="danger" *ngIf="playerPaymentMethod?.hasPaymentMethod" (click)="deletePlayerPaymentMethod()">
-            Eliminar medio anterior
+            Desvincular cuenta
           </button>
         </div>
       </article>
 
       <article class="card">
         <h2>Como funciona</h2>
-        <p class="muted">Al crear o unirte a un turno se intenta reservar tu importe automaticamente. Si Mercado Pago rechaza la reserva, no quedas dentro del turno.</p>
-        <p class="muted">Cuando el turno termina, la aplicacion captura automaticamente los pagos reservados. Si sales antes del partido, se cancela tu reserva.</p>
+        <p class="muted">1. Te unes al turno y queda reservado tu importe.</p>
+        <p class="muted">2. Jugas el partido con los demas jugadores.</p>
+        <p class="muted">3. Al finalizar, recibes una notificacion y pagas en Mercado Pago con split al club y la plataforma.</p>
       </article>
     </section>
 
@@ -552,11 +520,11 @@
       </article>
     </section>
 
-    <section class="card" *ngIf="lastPayment">
+    <section class="card" *ngIf="lastPayment?.checkoutUrl">
       <h2>Mercado Pago</h2>
-      <p>Autorizacion de pago creada.</p>
-      <p class="muted">Completa el proceso en Mercado Pago para reservar tu lugar en el turno.</p>
-      <a [href]="lastPayment.checkoutUrl" target="_blank" rel="noreferrer">Abrir autorizacion</a>
+      <p>Checkout de pago listo.</p>
+      <p class="muted">Completa el pago en Mercado Pago para cerrar tu parte del turno.</p>
+      <a [href]="lastPayment.checkoutUrl" target="_blank" rel="noreferrer">Ir a Mercado Pago</a>
     </section>
   </ng-container>
 </main>
