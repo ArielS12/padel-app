@@ -60,6 +60,12 @@ public sealed class PlayerPaymentsController(
             return BadRequest("El administrador debe configurar el Access Token de Mercado Pago para guardar tarjetas.");
         }
 
+        var credentialError = MercadoPagoPlatformCredentials.ValidateCardSaveCredentials(settings, accessToken);
+        if (credentialError is not null)
+        {
+            return BadRequest(credentialError);
+        }
+
         var method = await db.PlayerPaymentMethods
             .SingleOrDefaultAsync(x => x.UserId == CurrentUserId, cancellationToken);
 

@@ -153,6 +153,12 @@ public sealed class MercadoPagoCustomerCardService(IHttpClientFactory httpClient
         var createBody = await createResponse.Content.ReadAsStringAsync(cancellationToken);
         if (!createResponse.IsSuccessStatusCode)
         {
+            if (createBody.Contains("Unauthorized use of live credentials", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Mercado Pago rechazo las credenciales: la Public Key y el Access Token deben ser del mismo ambiente (ambos TEST para pruebas o ambos APP_USR de produccion).");
+            }
+
             throw new InvalidOperationException($"Mercado Pago rechazo crear el cliente ({(int)createResponse.StatusCode}). {createBody}");
         }
 
