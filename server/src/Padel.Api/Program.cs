@@ -145,11 +145,13 @@ static async Task InitializeDatabaseAsync(WebApplication app, string databasePro
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var isPostgres = databaseProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase) ||
+        databaseProvider.Equals("Postgres", StringComparison.OrdinalIgnoreCase);
 
-    if (databaseProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase) ||
-        databaseProvider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
+    if (isPostgres)
     {
         await db.Database.EnsureCreatedAsync();
+        await PostgresSchemaUpdater.ApplyAsync(db);
     }
     else if (app.Environment.IsDevelopment())
     {

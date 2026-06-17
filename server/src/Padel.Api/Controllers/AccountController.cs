@@ -15,7 +15,7 @@ namespace Padel.Api.Controllers;
 public sealed class AccountController(
     UserManager<ApplicationUser> userManager,
     AppDbContext db,
-    HttpClient httpClient) : ApiControllerBase
+    IHttpClientFactory httpClientFactory) : ApiControllerBase
 {
     private const string MercadoPagoAccountMethod = "mercadopago_account";
     private const string ClubOwnerOAuthPurpose = "ClubOwner";
@@ -154,6 +154,24 @@ public sealed class AccountController(
             return BadRequest("Mercado Pago no devolvio codigo de autorizacion.");
         }
 
+        try
+        {
+            return await CompleteMercadoPagoOAuthCallbackAsync(code, state, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return Problem(
+                detail: ex.Message,
+                title: "No se pudo completar la vinculacion con Mercado Pago.");
+        }
+    }
+
+    private async Task<IActionResult> CompleteMercadoPagoOAuthCallbackAsync(
+        string code,
+        string state,
+        CancellationToken cancellationToken)
+    {
+        var httpClient = httpClientFactory.CreateClient();
         var oauthState = await db.MercadoPagoOAuthStates
             .SingleOrDefaultAsync(x => x.State == state && x.UsedAtUtc == null, cancellationToken);
         if (oauthState is null)
